@@ -11,7 +11,8 @@ a clone.
 
 ## Setup
 
-You need Node.js 24 (`.nvmrc`, what CI uses) and npm 11.
+You need Node.js 24 (`.nvmrc`, what CI uses) and npm 11. The package supports Node.js 22
+and later (`engines`), and CI also runs the tests on Node 22.
 
 ```
 npm ci             # install exactly what package-lock.json says

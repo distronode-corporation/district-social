@@ -15,7 +15,7 @@ in the version bump, before the tag.
 ## [0.1.0] - 2026-11-16
 
 The first release. The npm package is the engine: ES modules with TypeScript declarations,
-for Node.js 24 or later. The CLI is in the repository and runs from a clone.
+for Node.js 22 or later. The CLI is in the repository and runs from a clone.
 
 ### Added
 

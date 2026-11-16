@@ -20,7 +20,7 @@ registered and its credentials resolve.
 
 ## Install
 
-With Node.js 24 or later:
+With Node.js 22 or later:
 
 ```
 npm install district-social
