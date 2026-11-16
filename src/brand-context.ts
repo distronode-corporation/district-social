@@ -21,7 +21,7 @@
  * is a development knob for trying a brief without editing a pack; never set
  * it on a server that holds more than one brand.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import type { LlmClient } from "./ports.js";

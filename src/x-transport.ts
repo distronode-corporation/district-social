@@ -6,7 +6,7 @@
  * post/reply/delete/lookup lives here; everything about *talking* to X lives
  * in x.ts.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {

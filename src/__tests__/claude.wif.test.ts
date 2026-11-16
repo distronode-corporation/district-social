@@ -135,7 +135,7 @@ describe("genJson on workload identity federation (real SDK)", () => {
     }
     expect(h.getSecret).not.toHaveBeenCalled();
     expect(console.info).toHaveBeenCalledWith(
-      `[socialhq] Claude auth: workload identity federation (rule ${RULE}, gce-metadata); ANTHROPIC_API_KEY is set and NOT used.`,
+      `[district-social] Claude auth: workload identity federation (rule ${RULE}, gce-metadata); ANTHROPIC_API_KEY is set and NOT used.`,
     );
   });
 

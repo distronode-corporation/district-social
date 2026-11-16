@@ -2,6 +2,8 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
+    // No source maps in the package: they would point at ../src/*.ts, which is not in it.
+    "sourceMap": false,
     "rootDir": "src",
     "outDir": "dist"
   },

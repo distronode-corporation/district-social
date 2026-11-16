@@ -3,7 +3,7 @@ import { ANTHROPIC_API_BASE_URL, tokenSource, wifCredentials, wifSettingsFromEnv
 import type { ModelStamp } from "./types.js";
 
 /**
- * Social HQ's text model: every draft, format, revise, QA review, idea,
+ * The engine's text model: every draft, format, revise, QA review, idea,
  * triage, card and video plan, and the copilot, on Claude Sonnet 5.5 at effort
  * high.
  *
@@ -96,7 +96,7 @@ export async function socialClaude(): Promise<Anthropic> {
         }),
       };
       console.info(
-        `[socialhq] Claude auth: workload identity federation (rule ${wif.federationRuleId}, ${tokenSource(wif)})` +
+        `[district-social] Claude auth: workload identity federation (rule ${wif.federationRuleId}, ${tokenSource(wif)})` +
           `${process.env.ANTHROPIC_API_KEY ? "; ANTHROPIC_API_KEY is set and NOT used" : ""}.`,
       );
     }

@@ -664,7 +664,7 @@ describe("qa", () => {
               severity: "fail",
               platform: "tiktok",
               message: "TikTok has no way to publish: no direct connection, and no aggregator channel for it",
-              fix: "Connect TikTok in Social HQ settings, or remove it from this post's targets.",
+              fix: "Connect TikTok, or remove it from this post's targets.",
             }),
           ]);
         });

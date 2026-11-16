@@ -366,7 +366,7 @@ describe("wifCredentials", () => {
 
     expect(info).toHaveBeenCalledTimes(1);
     expect(String(info.mock.calls[0]![0])).toMatch(
-      new RegExp(`^\\[socialhq\\] Claude WIF token exchanged for rule ${RULE} \\(gce-metadata\\); valid (59[89]|600)s\\.$`),
+      new RegExp(`^\\[district-social\\] Claude WIF token exchanged for rule ${RULE} \\(gce-metadata\\); valid (59[89]|600)s\\.$`),
     );
     expect(logged()).not.toContain(ACCESS);
     expect(logged()).not.toContain(GCE_JWT);
@@ -406,10 +406,10 @@ describe("wifCredentials", () => {
     expect(error).toHaveBeenCalledTimes(1);
     const line = String(error.mock.calls[0]![0]);
     expect(line).toMatch(
-      new RegExp(`^\\[socialhq\\] Claude WIF token exchange FAILED for rule ${RULE} \\(gce-metadata, WorkloadIdentityError: Token exchange failed with status 401`),
+      new RegExp(`^\\[district-social\\] Claude WIF token exchange FAILED for rule ${RULE} \\(gce-metadata, WorkloadIdentityError: Token exchange failed with status 401`),
     );
     expect(line).toContain(
-      "No API key fallback: the Social HQ call fails. Deny reasons: Claude Console, Workload identity, authentication history.",
+      "No API key fallback: the Claude call fails. Deny reasons: Claude Console, Workload identity, authentication history.",
     );
     expect(logged()).not.toContain(GCE_JWT);
   });

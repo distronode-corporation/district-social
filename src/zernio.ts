@@ -18,7 +18,7 @@
  * (https://zernio.com/openapi.yaml) and docs.zernio.com. Anywhere
  * the spec did not settle something, the comment says so rather than asserting.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import { retryAfterHeader } from "./retry.js";

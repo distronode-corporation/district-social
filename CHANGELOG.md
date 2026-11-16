@@ -12,19 +12,59 @@ in the version bump, before the tag.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-16
+
+The first release. The npm package is the engine: ES modules with TypeScript declarations,
+for Node.js 22 or later. The CLI is in the repository and runs from a clone.
+
 ### Added
 
-- Repository scaffolding: licence and policy files, CI (lint, type-check, tests at 100 percent
-  coverage), CodeQL, OpenSSF Scorecard, dependency review, zizmor, gitleaks, a licence
-  allowlist check, Dependabot, and an npm trusted-publishing release workflow.
-- The District Social engine (formatting, QA, revision and approval-gated publishing for 10
-  networks, with in-memory ports) and the `scripts/social` CLI (#2).
+- The engine (#2). `createEngine` binds a brand pack (the brief every model call reads, plus
+  optional QA gates) and the ports an application provides: a clock, a model, and optionally
+  stores for drafts, credentials and media, a lock and an approval gate. Every port has an
+  in-memory implementation, so a single process runs with no infrastructure.
+- Formatting (#2). `formatPost` turns one source post into a render per network from a
+  model's structured output, and the engine writes image alt text. Per-network playbooks
+  then trim hashtags and move or drop body links in code, so those rules do not depend on
+  the model following its prompt.
+- QA (#2). `runQa` checks each render against its network's limits and media rules, the
+  limits each connected transport declares, the brand pack's compliance gates and an
+  optional model review, and returns one pass or fail report (`qaScore` gives it a weighted
+  score).
+- Revision (#2). `applyMechanicalFixes` clears the issues that are text or media-count edits
+  without a model call; `reviseRenders` asks the model for the smallest edit that clears the
+  issues still open on the current copy.
+- Publishing (#2). `publishDraft` sends each render through its network's own API:
+  Instagram, Facebook, Threads, X, LinkedIn, YouTube, Reddit, Bluesky, Pinterest and TikTok.
+  A transport override can route a network through an aggregator instead (Zernio is the one
+  included). Images are fitted to each destination's limits at publish time, through a
+  fitter the application injects.
+- Approvals (#2). The `ApprovalGate` port is a single-use approval for one draft and a hash
+  of its exact renders, with an in-memory gate. The port has no call that grants an
+  approval. `publishDraft` does not consult the gate in this release: the application
+  consumes the approval before it publishes.
+- Models (#2). The default model client is Claude, with your own Anthropic API key (read
+  through `setSecretGetter`) or Anthropic workload identity federation, and any `LlmClient`
+  with the same contract can replace it. Video generation is Vertex AI Veo
+  (`startVideoGeneration`, `pollVideoOperation`) in your own Google Cloud project.
+- Bluesky sessions are bound to the account they were created for (#4). A stored session
+  carries a hash of the configured identifier and is resumed only when that matches; a
+  session for another identifier, or one stored without the hash, is dropped and the
+  configured account logs in once.
+- Trims that run in linear time (#4). The trailing-character trims CodeQL flagged as
+  polynomial-time regular expressions (URL punctuation in QA and link placement, slashes in
+  subreddit names and media base URLs, line-end whitespace in the Threads topic-tag lift)
+  give the same output without slowing down on long runs of those characters.
+- The CLI, `scripts/social/` (#2). A client of an agent API built on this engine, with
+  `new`, `list`, `show`, `qa`, `preflight`, `publish`, `unschedule`, `accounts`, `evidence`
+  and `profiles`. It authenticates with a Google ID token from Application Default
+  Credentials, sends requests only to the configured https origin, and publishes only by
+  citing the id of an approval a person created for that draft.
+- The project. CI runs lint, type-check, build and tests at 100 percent coverage per file,
+  plus CodeQL, OpenSSF Scorecard, dependency review, zizmor, gitleaks and a licence
+  allowlist, with Dependabot for updates. A review-threads check keeps a pull request red
+  while any review thread on it is unresolved (#4). The release workflow publishes from a
+  version tag with npm trusted publishing and a provenance attestation.
 
-### Fixed
-
-- Trailing-character trims that CodeQL flagged as polynomial ReDoS (URL punctuation in QA
-  and link placement, slashes in subreddit names and media base URLs, line-end whitespace in
-  the Threads topic-tag lift) now run in linear time with the same output.
-- Bluesky session ownership check no longer drops a valid email-configured session.
-
-[Unreleased]: https://github.com/distronode-corporation/district-social/commits/main
+[Unreleased]: https://github.com/distronode-corporation/district-social/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/distronode-corporation/district-social/releases/tag/v0.1.0

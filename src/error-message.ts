@@ -5,7 +5,7 @@
  * same semantics: an Error gives its message, a string is returned as is, an
  * object with a `message` field gives `String(message)`, and anything else
  * falls through to `String(value)`. It lives here because this engine takes
- * relative imports only (no `@/`), so it cannot import the app's copy. Keep
+ * relative imports only, so it cannot import the app's copy. Keep
  * the two in step.
  *
  * The inline `err instanceof Error ? err.message : String(err)` it replaces

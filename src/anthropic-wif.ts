@@ -7,7 +7,7 @@ import type { AccessTokenProvider, IdentityTokenProvider } from "@anthropic-ai/s
 import { GoogleAuth } from "google-auth-library";
 
 /**
- * Social HQ's Anthropic credentials: Workload Identity Federation (WIF).
+ * The engine's Anthropic credentials: Workload Identity Federation (WIF).
  *
  * The engine's Claude calls (claude.ts) can authenticate with a short-lived
  * Anthropic access token minted from the workload's own identity instead of a
@@ -39,12 +39,12 @@ import { GoogleAuth } from "google-auth-library";
  * client holds one credential: with `credentials` passed, the environment is
  * never read, null or no null, so the two stay only as the explicit no-key /
  * no-token declaration. A failed exchange therefore never falls back to a key:
- * the call throws, and every Social HQ caller treats a throw as "no answer"
+ * the call throws, and every engine caller treats a throw as "no answer"
  * (QA blocks with `llm-qa-unavailable`).
  *
  * ⛔ A PARTIAL SET THROWS, never reads as "not configured": a pod with a rule ID
  * and no service account ID is a broken WIF config, and treating it as absent
- * would put Social HQ on the key without a word. An empty value counts as
+ * would put the engine on the key without a word. An empty value counts as
  * unset, so a manifest can carry the four names with empty values (inert)
  * until a rollout fills all four.
  *
@@ -61,7 +61,7 @@ import { GoogleAuth } from "google-auth-library";
  * appear in it.
  */
 
-/** The four IDs that switch Social HQ onto WIF: all set, or none. */
+/** The four IDs that switch the engine onto WIF: all set, or none. */
 export const ANTHROPIC_WIF_KEYS = [
   "ANTHROPIC_FEDERATION_RULE_ID",
   "ANTHROPIC_ORGANIZATION_ID",
@@ -88,13 +88,13 @@ export const IAM_CREDENTIALS_URL = "https://iamcredentials.googleapis.com/v1/pro
 /** `generateIdToken` answers in well under a second; this bounds a hung call. */
 export const ID_TOKEN_TIMEOUT_MS = 10_000;
 
-/** The audience every Social HQ federation rule requires, and the API host. */
+/** The audience the engine's federation rules require, and the API host. */
 export const ANTHROPIC_API_BASE_URL = "https://api.anthropic.com";
 
 /**
- * ⛔ `format=full`: the us rule's CEL matches the `google.compute_engine`
- * claims, which a `format=standard` token does not carry. Byte-identical to the
- * voice agent's URL, so both rules on issuer A see the same claim set.
+ * ⛔ `format=full`: a federation rule whose CEL matches the
+ * `google.compute_engine` claims needs them, and a `format=standard` token does
+ * not carry them.
  */
 export const GCE_METADATA_IDENTITY_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity" +
@@ -105,7 +105,7 @@ export const METADATA_TIMEOUT_MS = 2_000;
 
 /**
  * The token exchange (`POST /v1/oauth/token`). The SDK sets no timeout of its
- * own on this request, and a Social HQ request waits on it before it can start.
+ * own on this request, and the caller's request waits on it before it can start.
  */
 export const EXCHANGE_TIMEOUT_MS = 10_000;
 
@@ -279,7 +279,7 @@ export function wifCredentials(settings: WifSettings): AccessTokenProvider {
       // never reaches here.
       const validFor = Number(token.expiresAt) - Math.floor(Date.now() / 1000);
       console.info(
-        `[socialhq] Claude WIF token exchanged for rule ${settings.federationRuleId} (${source}); valid ${validFor}s.`,
+        `[district-social] Claude WIF token exchanged for rule ${settings.federationRuleId} (${source}); valid ${validFor}s.`,
       );
       return token;
     } catch (err) {
@@ -287,8 +287,8 @@ export function wifCredentials(settings: WifSettings): AccessTokenProvider {
       // already redacted) or AnthropicError (the token file), or WifSetupError.
       const { name, message } = err as Error;
       console.error(
-        `[socialhq] Claude WIF token exchange FAILED for rule ${settings.federationRuleId} (${source}, ${name}: ${message}). ` +
-          "No API key fallback: the Social HQ call fails. Deny reasons: Claude Console, Workload identity, authentication history.",
+        `[district-social] Claude WIF token exchange FAILED for rule ${settings.federationRuleId} (${source}, ${name}: ${message}). ` +
+          "No API key fallback: the Claude call fails. Deny reasons: Claude Console, Workload identity, authentication history.",
       );
       throw err;
     }

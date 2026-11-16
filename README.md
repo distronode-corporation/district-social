@@ -3,7 +3,9 @@
 District Social is an engine and a command-line client for drafting, checking and publishing
 social posts. The engine turns one source post into a render per network, runs QA over the
 renders (mechanical limits, compliance gates and an optional model review), applies fixes, and
-publishes through each network's own API once a person has approved exactly what will be sent.
+publishes through each network's own API. It is built for publishing only what a person has
+approved, exactly as it will be sent, with the approval enforced by the application (see
+Using the engine).
 
 ## Networks
 
@@ -18,7 +20,14 @@ registered and its credentials resolve.
 
 ## Install
 
-The package is not on npm yet. Install from source, with Node.js 24 or later:
+With Node.js 22 or later:
+
+```
+npm install district-social
+```
+
+The package is the engine: ES modules with TypeScript declarations. The CLI is not in it; it
+runs from a clone of this repository, which also builds the package from source:
 
 ```
 git clone https://github.com/distronode-corporation/district-social.git
@@ -53,17 +62,20 @@ const report = await engine.runQa(draft);
 console.log(report.issues);
 ```
 
-`callYourModel` stands for your own model call. The full public surface is `src/index.ts`.
+`callYourModel` stands for your own model call. The full public surface is `src/index.ts`
+(`dist/index.d.ts` in the package).
 
-Publishing is approval-gated: the engine only consumes a single-use approval for a hash of the
-exact renders, and has no call that grants one. Grants come from the application's own human
-surface.
+Approval is the application's to enforce. The engine defines the `ApprovalGate` port: a
+single-use approval for one draft and a hash of its exact renders. The port has no call that
+grants one; grants come from the application's own human surface (`grant` on
+`inMemoryApprovalGate()`, in a single process). `publishDraft` does not consult the gate
+itself, so the application calls `consume` on it before it calls `publishDraft`.
 
 ## The CLI
 
 `scripts/social/` is a command-line client for an agent API built on this engine: draft, QA,
-check before approval, publish on approval, and read back what went out. See
-[scripts/social/README.md](scripts/social/README.md).
+check before approval, publish on approval, and read back what went out. It is not in the
+npm package; it runs from a clone. See [scripts/social/README.md](https://github.com/distronode-corporation/district-social/blob/main/scripts/social/README.md).
 
 ## Bring your own credentials and model
 
@@ -79,9 +91,9 @@ and a refusal or truncated reply throws) as `llm`.
 
 ## Project
 
-- [CONTRIBUTING.md](CONTRIBUTING.md): how to run the local gate, and the rules for changes.
-- [SECURITY.md](SECURITY.md): how to report a vulnerability privately.
-- [CHANGELOG.md](CHANGELOG.md): what changed, release by release.
+- [CONTRIBUTING.md](https://github.com/distronode-corporation/district-social/blob/main/CONTRIBUTING.md): how to run the local gate, and the rules for changes.
+- [SECURITY.md](https://github.com/distronode-corporation/district-social/blob/main/SECURITY.md): how to report a vulnerability privately.
+- [CHANGELOG.md](https://github.com/distronode-corporation/district-social/blob/main/CHANGELOG.md): what changed, release by release.
 
-Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 Distronode
-Corporation; see [NOTICE](NOTICE).
+Licensed under the [Apache License, Version 2.0](https://github.com/distronode-corporation/district-social/blob/main/LICENSE). Copyright 2026 Distronode
+Corporation; see [NOTICE](https://github.com/distronode-corporation/district-social/blob/main/NOTICE).

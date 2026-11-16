@@ -15,7 +15,7 @@
  * `metaCredentials` / `MetaGraphError` come straight from meta-graph.ts,
  * which is NOT modified or duplicated here (see that file's own header).
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {

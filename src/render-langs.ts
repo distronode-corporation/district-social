@@ -6,7 +6,7 @@ import type { Platform } from "./types.js";
  * The Bluesky transport sends `PlatformRender.langs` on the root post and on
  * every inline reply, but until this module existed no editor could write it:
  * the hosted PUT whitelisted it away and the CLI's `set` had no option for it.
- * Both now call `parseRenderLangs`, so the CLI and Social HQ cannot disagree on
+ * Both now call `parseRenderLangs`, so the CLI and the host application cannot disagree on
  * what a valid tag is, and neither can store a value the publisher would choke
  * on.
  *

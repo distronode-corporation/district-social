@@ -5,8 +5,10 @@ name: CI
 #   lint        eslint with typescript-eslint's recommended type-checked rules.
 #   typecheck   tsc --noEmit over the sources, the tests and the vitest config.
 #   test        vitest with coverage, whose thresholds in vitest.config.ts fail the job below
-#               100 percent per file.
-# The Node version is the one in .nvmrc.
+#               100 percent per file. It runs twice: on .nvmrc's version as `test`, the
+#               check the ruleset requires, and on Node 22, the oldest line package.json's
+#               engines admits, as `test (node 22)`.
+# Every other job runs on the Node version in .nvmrc.
 on:
   push:
     branches: [main]
@@ -75,6 +77,14 @@ jobs:
       - run: npm run build
 
   test:
+    # The ruleset requires a check named exactly `test`, so the .nvmrc leg keeps that name
+    # and the other leg is `test (node 22)`. fail-fast is off: a Node 22 failure must not
+    # cancel the required leg.
+    name: ${{ matrix.node == 'nvmrc' && 'test' || format('test (node {0})', matrix.node) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [nvmrc, '22']
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -89,6 +99,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+          # Empty on the .nvmrc leg. On the Node 22 leg it is set, and setup-node takes
+          # node-version over node-version-file.
+          node-version: ${{ matrix.node != 'nvmrc' && matrix.node || '' }}
           cache: ${{ !inputs.no_cache && 'npm' || '' }}
           package-manager-cache: ${{ !inputs.no_cache }}
       - run: npm ci

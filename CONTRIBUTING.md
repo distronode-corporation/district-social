@@ -5,12 +5,14 @@ negotiable.
 
 ## Status
 
-The engine (`src/`) and the CLI (`scripts/social/`) are here and pass the gate below. The
-package is not on npm yet (see the README for installing from source).
+The engine (`src/`) and the CLI (`scripts/social/`) are here and pass the gate below. The npm
+package, released from a version tag (see Releasing), is the engine alone; the CLI runs from
+a clone.
 
 ## Setup
 
-You need Node.js 24 (`.nvmrc`, what CI uses) and npm 11.
+You need Node.js 24 (`.nvmrc`, what CI uses) and npm 11. The package supports Node.js 22
+and later (`engines`), and CI also runs the tests on Node 22.
 
 ```
 npm ci             # install exactly what package-lock.json says

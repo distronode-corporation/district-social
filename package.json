@@ -1,8 +1,8 @@
 {
   "name": "district-social",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
-  "description": "District Social: an engine and CLI for drafting, checking and publishing social posts",
+  "description": "District Social: an engine for drafting, checking and publishing social posts",
   "license": "Apache-2.0",
   "author": "Distronode Corporation",
   "homepage": "https://github.com/distronode-corporation/district-social#readme",
@@ -15,13 +15,16 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -41,7 +44,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "1.7.0",
     "@atproto/api": "0.20.44",
-    "commander": "15.0.0",
     "google-auth-library": "11.3.1",
     "undici": "7.30.2"
   },
@@ -49,6 +51,7 @@
     "@eslint/js": "10.0.1",
     "@types/node": "24.19.2",
     "@vitest/coverage-v8": "5.1.0",
+    "commander": "15.0.0",
     "eslint": "10.14.0",
     "tsx": "4.23.15",
     "typescript": "6.0.3",

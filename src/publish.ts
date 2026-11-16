@@ -185,7 +185,7 @@ async function sweepConnectedAccounts(): Promise<ConnectedSweep> {
           account: { accountId: status.accountId, displayName: status.displayName },
         };
       } catch (err) {
-        console.warn(`[socialhq] ${platform} transport could not report status: ${String(err)}`);
+        console.warn(`[district-social] ${platform} transport could not report status: ${String(err)}`);
         return { platform, reason: `status check failed: ${getErrorMessage(err)}` };
       }
     }),
@@ -282,7 +282,7 @@ export async function resolveRedditRestrictions(
     return readSubredditRules(subreddit, await transport.destinationRules(subreddit));
   } catch (err) {
     console.warn(
-      `[socialhq] could not read r/${subreddit} restrictions, publishing on defaults:`,
+      `[district-social] could not read r/${subreddit} restrictions, publishing on defaults:`,
       err instanceof Error ? err.message : err,
     );
     return null;
@@ -333,7 +333,7 @@ export async function assertPinterestBoard(
     boards = await transport.listBoards();
   } catch (err) {
     console.warn(
-      "[socialhq] could not read Pinterest boards, publishing on defaults:",
+      "[district-social] could not read Pinterest boards, publishing on defaults:",
       err instanceof Error ? err.message : err,
     );
     return;
@@ -350,7 +350,7 @@ function assertBoardAmong(
   if (!boards.length) {
     throw new PublishPreflightError(
       `the Pinterest account "${displayName}" has no boards, so a pin has nowhere to go. ` +
-        `Create a board in Pinterest first, then set it as the default in Social HQ settings.`,
+        `Create a board in Pinterest first, then set it as the default board.`,
     );
   }
   if (!boards.some((b) => b.id === wanted)) {
@@ -419,7 +419,7 @@ function pinDestination(r: PlatformRender, link: string): string {
 
 /**
  * The draft-and-settings half of a publish: everything a transport needs that
- * lives on the DRAFT or in Social HQ settings rather than on the render.
+ * lives on the DRAFT or in the host's settings rather than on the render.
  *
  * Shares its resolution rules with `assertPublishable()` below rather than
  * restating them — a board or subreddit resolved one way here and another way
@@ -499,7 +499,7 @@ export function assertPublishable(
       if (!board) {
         throw new PublishPreflightError(
           `pinterest needs a destination board. Set one on the draft, or set a default ` +
-            `(Social HQ settings "defaultPinterestBoard", or SOCIALMETA_DEFAULT_PINTEREST_BOARD).`,
+            `(the "defaultPinterestBoard" setting, or SOCIALMETA_DEFAULT_PINTEREST_BOARD).`,
         );
       }
       return;
@@ -509,7 +509,7 @@ export function assertPublishable(
       if (!subreddit) {
         throw new PublishPreflightError(
           `reddit needs a target subreddit. Set one on the draft, or set a default ` +
-            `(Social HQ settings "defaultSubreddit", or SOCIALMETA_DEFAULT_SUBREDDIT).`,
+            `(the "defaultSubreddit" setting, or SOCIALMETA_DEFAULT_SUBREDDIT).`,
         );
       }
       const mediaCount = r.mediaIndices.filter((i) => draft.source.media[i]).length;
@@ -634,7 +634,7 @@ export interface PublishResult {
    * nothing would report it: the draft settles as `published` because every
    * leg is terminal.
    *
-   * The engine cannot write `threadState` itself (no prisma), so this is the
+   * The engine cannot write `threadState` itself (it has no database), so this is the
    * channel. A caller that ignores it loses the replies, which is why the
    * caller must persist it in the same update as `providerPostId`.
    */

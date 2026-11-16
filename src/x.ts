@@ -23,7 +23,7 @@
  * blogs. Where a page did not spell something out, the comment says so rather
  * than asserting it.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import type { RecentPostsPage } from "./recent-posts.js";
@@ -82,7 +82,7 @@ let _resolver: XTokenResolver | null = null;
  *
  * INJECTED rather than imported, exactly like setPinterestTokenResolver and
  * setLinkedInTokenResolver: this folder is the portable engine and cannot
- * reach the app's credential store itself (that needs prisma and the app's
+ * reach the app's credential store itself (that needs the app's database and
  * encryption keys).
  *
  * ⚠️ Deliberately called fresh on EVERY request, never cached here. X's own

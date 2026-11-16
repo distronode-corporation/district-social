@@ -16,7 +16,7 @@
  *      comma-joined column that holds legacy bare aggregator ids, with no
  *      migration.
  *
- * Engine rules apply here: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply here: relative imports only.
  * The app wires the resolver in; this file never reads a database.
  */
 
@@ -472,7 +472,7 @@ export interface DirectQueuedReply {
 }
 
 /**
- * Publish-time facts that live on the DRAFT or in Social HQ settings rather
+ * Publish-time facts that live on the DRAFT or in the host's settings rather
  * than on the render, resolved once by publish.ts and handed to the transport.
  *
  * This exists because the aggregator path had a second, invisible input the
@@ -488,7 +488,7 @@ export interface DirectQueuedReply {
  * forgetting to pass this is a compile error rather than a quiet regression.
  */
 export interface PublishDestination {
-  /** Pinterest board id, AFTER the Social HQ default has been applied. */
+  /** Pinterest board id, AFTER the host's default has been applied. */
   board?: string;
   /**
    * Click-through URL, from `draft.source.link`. Separate from the body text

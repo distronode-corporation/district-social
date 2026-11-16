@@ -16,7 +16,7 @@
  *     (`x-restli-id`), not the body, which is unlike every other vendor this
  *     engine talks to.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -212,7 +212,7 @@ let _orgGeneration = 0;
  *
  * INJECTED rather than imported, like setBlueskyCredentialsResolver: this
  * folder is the portable engine and cannot reach the app's credential store
- * (that would need `@/`, prisma and the app's encryption keys). Clearing also
+ * (that would need the app's database and encryption keys). Clearing also
  * drops the cached organization URN: a credential rotation
  * (a fresh re-consent naming a different org, or a disconnect) must not leave
  * the process posting to whatever org the OLD token administered.

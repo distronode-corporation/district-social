@@ -22,7 +22,7 @@
  * description (github.com/pinterest/api-description, v5/openapi.yaml) and the
  * generated Python client's model docs, not against training data.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import type { RecentPostsPage } from "./recent-posts.js";
@@ -112,7 +112,7 @@ let _resolver: PinterestTokenResolver | null = null;
  *
  * INJECTED rather than imported, exactly like setBlueskyCredentialsResolver:
  * this folder is the portable engine and cannot reach the app's credential
- * store itself (that needs prisma and the app's encryption keys). Unlike
+ * store itself (that needs the app's database and encryption keys). Unlike
  * Bluesky there is no session to open and cache here: the resolver is called
  * fresh on EVERY request rather than memoised in this file, because the app's
  * token store already owns both the caching and the expiry check for the

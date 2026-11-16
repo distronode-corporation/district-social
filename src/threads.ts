@@ -37,7 +37,7 @@ import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch
  * data. Where something could not be confirmed from an official
  * page, the comment says so rather than asserting it.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 const THREADS_HOST = "https://graph.threads.net";
