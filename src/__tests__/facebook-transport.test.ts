@@ -528,9 +528,33 @@ describe("facebook transport", () => {
       );
     });
 
+    /** DELETE answers "does not exist"; every read (the Page probe) succeeds. */
+    const goneButPageReadable = async (_id: string, opts?: { method?: string }) => {
+      if (opts?.method === "DELETE") throw notFound();
+      return { id: "page-1" };
+    };
+
     it("treats an already-gone post (confirmed \"does not exist\") as SUCCESS, not a failure", async () => {
-      graphRequestMock.mockRejectedValue(notFound());
+      graphRequestMock.mockImplementation(goneButPageReadable);
       await expect(facebookTransport.deletePost("page-1_gone")).resolves.toBeUndefined();
+      // The ownership probe: the configured token still reads its own Page.
+      expect(graphRequestMock).toHaveBeenCalledWith("page-1", expect.objectContaining({ params: { fields: "id" } }));
+    });
+
+    it("⛔ does NOT read \"does not exist\" as gone for a story on ANOTHER Page", async () => {
+      // The credential was switched: the old Page's post is live, and Meta's
+      // "missing permissions" text reads exactly like a deleted post.
+      graphRequestMock.mockImplementation(goneButPageReadable);
+      await expect(facebookTransport.deletePost("page-old_1")).rejects.toThrow(
+        'facebook: Meta answered "does not exist" for page-old_1, which cannot be read as deleted: it belongs to Page page-old, not the configured Page page-1',
+      );
+    });
+
+    it("⛔ does NOT read \"does not exist\" as gone when the token cannot read its own Page", async () => {
+      graphRequestMock.mockRejectedValue(notFound());
+      await expect(facebookTransport.deletePost("reel:v1")).rejects.toThrow(
+        /for v1, which cannot be read as deleted: the configured token cannot read its own Page page-1 \(/,
+      );
     });
 
     it("still throws for a real failure (e.g. auth), not just swallowing everything", async () => {
@@ -580,12 +604,12 @@ describe("facebook transport", () => {
 
       await facebookTransport.deletePost("page-1_777:photo:photo-1");
 
-      expect(graphRequestMock).toHaveBeenCalledTimes(2);
-      expect(graphRequestMock.mock.calls[1][0]).toBe("photo-1");
+      const deletes = graphRequestMock.mock.calls.filter((c) => (c[1] as { method?: string }).method === "DELETE");
+      expect(deletes.map((c) => c[0])).toEqual(["page-1_777", "photo-1"]);
     });
 
     it("is idempotent when BOTH objects are already gone", async () => {
-      graphRequestMock.mockRejectedValue(notFound());
+      graphRequestMock.mockImplementation(goneButPageReadable);
       await expect(
         facebookTransport.deletePost("page-1_777:photo:photo-1"),
       ).resolves.toBeUndefined();

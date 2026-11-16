@@ -683,8 +683,43 @@ async function deleteGraphObject(id: string, creds: MetaCredentials): Promise<vo
       appSecret: creds.appSecret,
     });
   } catch (err) {
-    if (isMetaNotFound(err)) return; // idempotent: already gone is success
-    throw err;
+    if (!isMetaNotFound(err)) throw err;
+    // Idempotent: already gone is success, but only once the answer is about
+    // THIS Page's object (see whyNotGone).
+    const why = await whyNotGone(id, creds);
+    if (!why) return;
+    throw new Error(`facebook: Meta answered "does not exist" for ${id}, which cannot be read as deleted: ${why}`, {
+      cause: err,
+    });
+  }
+}
+
+/**
+ * Why a code-100 "does not exist" for `id` is NOT proof the object is gone, or
+ * null when it is.
+ *
+ * ⛔ Meta's text also covers "cannot be loaded due to missing permissions", so
+ * a token for ANOTHER Page (the credential was switched) or one that lost its
+ * own Page reads every live post as missing, and the delete reported success
+ * while the post stayed up. A feed story id names its Page
+ * (`{page-id}_{post-id}`), which has to be the configured one; a photo or Reel
+ * id names no owner. Either way the configured token must still read its own
+ * Page, or the answer says nothing about the object.
+ */
+async function whyNotGone(id: string, creds: MetaCredentials): Promise<string | null> {
+  const sep = id.indexOf("_");
+  if (sep > 0 && id.slice(0, sep) !== creds.pageId) {
+    return `it belongs to Page ${id.slice(0, sep)}, not the configured Page ${creds.pageId}`;
+  }
+  try {
+    await graphRequest<{ id: string }>(creds.pageId, {
+      params: { fields: "id" },
+      accessToken: creds.pageToken,
+      appSecret: creds.appSecret,
+    });
+    return null;
+  } catch (probe) {
+    return `the configured token cannot read its own Page ${creds.pageId} (${getErrorMessage(probe)})`;
   }
 }
 

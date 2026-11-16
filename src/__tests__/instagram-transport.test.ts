@@ -508,8 +508,31 @@ describe("instagram transport", () => {
     });
 
     it("treats an already-gone post (code 100, 'does not exist') as SUCCESS, not a failure", async () => {
-      graphRequestMock.mockRejectedValue(notFound());
+      graphRequestMock.mockImplementation(async (_id: string, opts?: { method?: string }) => {
+        if (opts?.method === "DELETE") throw notFound();
+        return { id: CREDS.igUserId };
+      });
       await expect(instagramTransport.deletePost("media-gone")).resolves.toBeUndefined();
+      // The ownership probe: the configured token still reads its own IG account.
+      expect(graphRequestMock).toHaveBeenCalledWith(CREDS.igUserId, expect.objectContaining({ params: { fields: "id" } }));
+    });
+
+    it("⛔ does NOT read code 100 as gone when the token cannot read its own Instagram account", async () => {
+      // Meta's text also means "missing permissions": a switched or revoked
+      // credential reads every live post this way.
+      graphRequestMock.mockRejectedValue(notFound());
+      await expect(instagramTransport.deletePost("media-1")).rejects.toThrow(
+        /instagram: Meta answered "does not exist" for media-1, which cannot be read as deleted: the configured token cannot read its own Instagram account ig-user-1 \(/,
+      );
+    });
+
+    it("⛔ does NOT read code 100 as gone with no Instagram account configured", async () => {
+      metaCredentialsMock.mockResolvedValue({ ...CREDS, igUserId: undefined });
+      graphRequestMock.mockRejectedValue(notFound());
+      await expect(instagramTransport.deletePost("media-1")).rejects.toThrow(
+        /cannot be read as deleted: no Instagram account is configured/,
+      );
+      expect(graphRequestMock).toHaveBeenCalledTimes(1);
     });
 
     it("still throws for a real failure (e.g. missing permission), not just swallowing everything", async () => {

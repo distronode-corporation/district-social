@@ -666,12 +666,29 @@ function isNotFoundError(err: unknown): boolean {
  * limitation never reaches a caller here.
  */
 async function deletePost(ref: string): Promise<void> {
-  const { pageToken, appSecret } = await metaCredentials();
+  const { pageToken, appSecret, igUserId } = await metaCredentials();
   try {
     await graphRequest(ref, { method: "DELETE", accessToken: pageToken, appSecret });
   } catch (err) {
-    if (isNotFoundError(err)) return; // idempotent: already gone is success
-    throw err;
+    if (!isNotFoundError(err)) throw err;
+    // ⛔ Idempotent (already gone is success) ONLY when the configured account
+    // still reads its own IG user. Meta's code-100 text also means "missing
+    // permissions", so a token switched to another account, or one that lost
+    // this one, read every live post as gone and the delete reported success
+    // while the post stayed up. A media id names no owner, so this is the
+    // ownership check there is.
+    let why: string | null = igUserId ? null : "no Instagram account is configured";
+    if (igUserId) {
+      try {
+        await graphRequest(igUserId, { params: { fields: "id" }, accessToken: pageToken, appSecret });
+      } catch (probe) {
+        why = `the configured token cannot read its own Instagram account ${igUserId} (${getErrorMessage(probe)})`;
+      }
+    }
+    if (!why) return;
+    throw new Error(`instagram: Meta answered "does not exist" for ${ref}, which cannot be read as deleted: ${why}`, {
+      cause: err,
+    });
   }
 }
 
