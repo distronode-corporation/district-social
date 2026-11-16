@@ -6,8 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *
  * ⛔ The failure it guards against: a `connectedAccounts()` that calls the
  * aggregator's `listChannels()` unconditionally and only overlays the direct
- * transports afterwards throws first and takes down publishing for ALL NINE
- * platforms, including ones that publish direct and never touch the
+ * transports afterwards throws first and takes down publishing on EVERY
+ * platform, including ones that publish direct and never touch the
  * aggregator. One `await` decides the blast radius.
  *
  * So the first block pins the property that prevents it: ONE source of routing, and a platform with no route is
@@ -35,8 +35,8 @@ import {
   PublishNotSentError,
   PublishPreflightError,
 } from "../publish.js";
-import { registerTransport, resetTransports } from "../transport.js";
-import type { DirectTransport } from "../transport.js";
+import { registerAggregator, registerTransport, resetTransports } from "../transport.js";
+import type { Aggregator, DirectTransport } from "../transport.js";
 import type { Draft, MediaAsset } from "../types.js";
 
 const ensureUploadedMock = ensureUploaded as unknown as ReturnType<typeof vi.fn>;
@@ -52,6 +52,26 @@ function blueskyTransport(): DirectTransport {
     deletePost: async () => {},
     postFacts: async () => new Map(),
     postUrl: (r: string) => `https://bsky.app/${r}`,
+  };
+}
+
+/** An aggregator whose account is gone: every call it makes answers 401. */
+const aggregatorPublishNow = vi.fn(async (): Promise<{ ref: string }> => {
+  throw new Error("zernio 401: unauthorized");
+});
+function deadAggregator(): Aggregator {
+  const unauthorized = async (): Promise<never> => {
+    throw new Error("zernio 401: unauthorized");
+  };
+  return {
+    id: "zernio",
+    platforms: () => ["reddit"],
+    channelRules: () => ({ maxLength: 40_000, countMode: "utf16" }),
+    connectStatus: unauthorized,
+    publishNow: aggregatorPublishNow,
+    deletePost: unauthorized,
+    postFacts: unauthorized,
+    postUrl: (_p, ref) => `https://zernio.test/${ref}`,
   };
 }
 
@@ -105,6 +125,56 @@ describe("routing", () => {
     expect(publishNow).toHaveBeenCalledTimes(1);
     expect(result.sent.map((s) => s.platform)).toEqual(["bluesky"]);
     expect(d.status).toBe("published");
+  });
+
+  describe("with a registered aggregator that answers 401 to everything", () => {
+    function mixedDraft(): Draft {
+      return blueskyDraft({
+        targets: ["bluesky", "reddit"],
+        renders: [
+          { platform: "bluesky", content: "Body", mediaIndices: [0] },
+          { platform: "reddit", content: "Body", mediaIndices: [], title: "Title", subreddit: "example" },
+        ],
+      });
+    }
+
+    beforeEach(() => {
+      process.env.SOCIALMETA_TRANSPORT_OVERRIDES = JSON.stringify({ bluesky: "direct", reddit: "aggregator:zernio" });
+      registerAggregator(deadAggregator());
+      invalidateConnectedAccounts();
+    });
+
+    it("⛔ costs only its own platform: the direct one is still connected and still publishes", async () => {
+      const map = await connectedAccounts();
+      expect(Object.keys(map)).toEqual(["bluesky"]);
+
+      // The default refuses the whole draft and names the dead platform,
+      // rather than silently sending half of it.
+      await expect(publishDraft(mixedDraft(), { now: true })).rejects.toThrow(
+        "platforms not connected: reddit",
+      );
+      expect(publishNow).not.toHaveBeenCalled();
+
+      const d = mixedDraft();
+      const result = await publishDraft(d, { now: true, skipUnconnected: true });
+      expect(publishNow).toHaveBeenCalledTimes(1);
+      expect(aggregatorPublishNow).not.toHaveBeenCalled();
+      expect(result.sent.map((s) => s.platform)).toEqual(["bluesky"]);
+    });
+
+    it("⛔ still sends the direct platform when the aggregator reports connected and then 401s the publish", async () => {
+      registerAggregator({
+        ...deadAggregator(),
+        connectStatus: async () => ({ connected: true, accountId: "acc_zernio", displayName: "zernio" }),
+      });
+      invalidateConnectedAccounts();
+      const d = mixedDraft();
+      const result = await publishDraft(d, { now: true });
+      expect(publishNow).toHaveBeenCalledTimes(1);
+      expect(aggregatorPublishNow).toHaveBeenCalled();
+      expect(result.sent.map((s) => s.platform)).toEqual(["bluesky"]);
+      expect(d.lastError).toContain("reddit");
+    });
   });
 
   it("refuses a draft whose only target has no route", async () => {

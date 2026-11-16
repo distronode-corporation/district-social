@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The transport is a business-logic layer on top of the vendor client, so it
 // is tested against a mocked client (this is publish.test.ts's own pattern
@@ -77,6 +77,14 @@ beforeEach(() => {
   uploadBlobMock.mockReset();
   getProfileMock.mockReset();
   vi.stubGlobal("fetch", vi.fn());
+});
+
+// A test that throws before its own cleanup line must not hand fake timers, a
+// console spy or the stubbed fetch to the next one.
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("bluesky transport", () => {

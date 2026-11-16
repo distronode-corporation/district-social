@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * Pinterest coverage. The load-bearing facts, all verified live against
- * `GET /integration-settings/:id`, are: `board` is REQUIRED and is
- * an id rather than a name, media is mandatory, the description caps at 500 and
- * the title at 100, and a video pin needs a separate cover image.
+ * Pinterest coverage. The load-bearing facts are: `board` is REQUIRED and is
+ * an id rather than a name, media is mandatory, the description caps at 800
+ * (Pinterest's own OpenAPI, `PinCreate.description`) and the title at 100, and
+ * a video pin needs a separate cover image.
  *
  * The boards-lookup tests are the important ones. The mapper's contract (empty
  * means empty, unreadable throws) is what stops "no boards" being reported about
