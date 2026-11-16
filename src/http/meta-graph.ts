@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { graphTime, type RecentPostsPage } from "../recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 /**
  * The shared Meta Graph client behind the P3 trio (Facebook Page, Instagram,
@@ -240,6 +240,27 @@ export async function graphRequest<T>(
   const base = `${GRAPH_HOST}/${META_GRAPH_VERSION}/${path.replace(/^\/+/, "")}`;
   const url = method === "GET" ? `${base}?${fields.toString()}` : base;
 
+  const responseOpts: VendorFetchOptions = {
+    // ⛔ EVERY VENDOR CLIENT IN THE ENGINE BOUNDS ITS REQUESTS, GRAPH TOO.
+    // Without a timeout a stalled connection to graph.facebook.com hangs the
+    // caller indefinitely rather than failing. That is worst on the WRITE
+    // path: a publish that hangs after Meta has already accepted the create
+    // leaves a live post on the Page with no id returned, so nothing
+    // downstream can find it to delete or reconcile: the post exists and its
+    // ref is unknown.
+    //
+    // 15s matches linkedin.ts and x.ts. Deliberately NOT longer: this client
+    // never sends bytes (Instagram and Facebook both publish by handing Meta
+    // a public `image_url` and letting Meta fetch it), so no request here is
+    // large. Pinterest's 120s ceiling exists precisely because it posts
+    // base64 in the body; nothing on this path does.
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    // MetaGraphError carries no method or path, so the timeout names them.
+    // vendor-fetch.ts owns the wording and the status-0 wrap, so a
+    // non-timeout network failure does not escape here as a raw TypeError.
+    label: `Meta ${method} ${path}`,
+    wrap: (status, message) => new MetaGraphError(message, status, null, null, null, null),
+  };
   const response = await vendorFetch(
     url,
     {
@@ -251,30 +272,10 @@ export async function graphRequest<T>(
             body: fields.toString(),
           }),
     },
-    {
-      // ⛔ EVERY VENDOR CLIENT IN THE ENGINE BOUNDS ITS REQUESTS, GRAPH TOO.
-      // Without a timeout a stalled connection to graph.facebook.com hangs the
-      // caller indefinitely rather than failing. That is worst on the WRITE
-      // path: a publish that hangs after Meta has already accepted the create
-      // leaves a live post on the Page with no id returned, so nothing
-      // downstream can find it to delete or reconcile: the post exists and its
-      // ref is unknown.
-      //
-      // 15s matches linkedin.ts and x.ts. Deliberately NOT longer: this client
-      // never sends bytes (Instagram and Facebook both publish by handing Meta
-      // a public `image_url` and letting Meta fetch it), so no request here is
-      // large. Pinterest's 120s ceiling exists precisely because it posts
-      // base64 in the body; nothing on this path does.
-      timeoutMs: REQUEST_TIMEOUT_MS,
-      // MetaGraphError carries no method or path, so the timeout names them.
-      // vendor-fetch.ts owns the wording and the status-0 wrap, so a
-      // non-timeout network failure does not escape here as a raw TypeError.
-      label: `Meta ${method} ${path}`,
-      wrap: (status, message) => new MetaGraphError(message, status, null, null, null, null),
-    },
+    responseOpts,
   );
 
-  const text = await response.text();
+  const text = await vendorText(response, responseOpts);
   let parsed: unknown;
   try {
     parsed = text ? JSON.parse(text) : {};
@@ -358,17 +359,18 @@ export async function ruploadHostedVideo(
   const proof = new URLSearchParams({ appsecret_proof: appsecretProof(accessToken, appSecret) });
   const url = `${RUPLOAD_HOST}/video-upload/${META_GRAPH_VERSION}/${encodeURIComponent(videoId)}?${proof.toString()}`;
 
+  const responseOpts: VendorFetchOptions = {
+    timeoutMs: RUPLOAD_TIMEOUT_MS,
+    label: `Meta Reels upload for video ${videoId}`,
+    wrap: (status, message) => new MetaGraphError(message, status, null, null, null, null),
+  };
   const response = await vendorFetch(
     url,
     { method: "POST", headers: { authorization: `OAuth ${accessToken}`, file_url: fileUrl } },
-    {
-      timeoutMs: RUPLOAD_TIMEOUT_MS,
-      label: `Meta Reels upload for video ${videoId}`,
-      wrap: (status, message) => new MetaGraphError(message, status, null, null, null, null),
-    },
+    responseOpts,
   );
 
-  const text = await response.text();
+  const text = await vendorText(response, responseOpts);
   let parsed: RuploadResponse;
   try {
     parsed = text ? (JSON.parse(text) as RuploadResponse) : {};

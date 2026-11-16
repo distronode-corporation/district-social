@@ -30,7 +30,7 @@
  */
 
 import { retryAfterHeader } from "./retry.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 export const TIKTOK_API_BASE_URL = "https://business-api.tiktok.com/open_api/v1.3";
 
@@ -115,6 +115,10 @@ async function request<T>(
   opts: { query?: Record<string, string>; body?: unknown; timeoutMs?: number },
 ): Promise<T> {
   const url = `${TIKTOK_API_BASE_URL}${path}${opts.query ? `?${new URLSearchParams(opts.query).toString()}` : ""}`;
+  const resOpts: VendorFetchOptions = {
+    timeoutMs: opts.timeoutMs ?? REQUEST_TIMEOUT_MS,
+    wrap: (status, message) => new TikTokError(status, null, message, method, path),
+  };
   const res = await vendorFetch(
     url,
     {
@@ -127,12 +131,9 @@ async function request<T>(
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     },
-    {
-      timeoutMs: opts.timeoutMs ?? REQUEST_TIMEOUT_MS,
-      wrap: (status, message) => new TikTokError(status, null, message, method, path),
-    },
+    resOpts,
   );
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) throw new TikTokError(res.status, null, text, method, path, retryAfterHeader(res));
   let parsed: Envelope<T>;
   try {

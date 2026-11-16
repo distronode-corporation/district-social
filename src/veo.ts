@@ -1,6 +1,6 @@
 import { GoogleAuth } from "google-auth-library";
 import { vertexVideoConfig } from "./settings.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 /**
  * Vertex AI Veo (video generation) client. Text calls go through claude.ts;
@@ -196,6 +196,11 @@ export class VeoError extends Error {
 
 async function postJson(url: string, body: unknown): Promise<Record<string, unknown>> {
   const token = await accessToken();
+  const responseOpts: VendorFetchOptions = {
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    label: "Vertex AI",
+    wrap: (status, message) => new VeoError(message, status, null),
+  };
   const response = await vendorFetch(
     url,
     {
@@ -206,14 +211,10 @@ async function postJson(url: string, body: unknown): Promise<Record<string, unkn
       },
       body: JSON.stringify(body),
     },
-    {
-      timeoutMs: REQUEST_TIMEOUT_MS,
-      label: "Vertex AI",
-      wrap: (status, message) => new VeoError(message, status, null),
-    },
+    responseOpts,
   );
 
-  const text = await response.text();
+  const text = await vendorText(response, responseOpts);
   let parsed: unknown;
   try {
     parsed = text ? JSON.parse(text) : {};

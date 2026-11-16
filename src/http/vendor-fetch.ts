@@ -41,6 +41,11 @@ export function noResponseMessage(timeoutMs: number, label?: string): string {
   );
 }
 
+function wrapFailure(err: unknown, opts: VendorFetchOptions): Error {
+  const timedOut = err instanceof Error && err.name === "TimeoutError";
+  return opts.wrap(0, timedOut ? noResponseMessage(opts.timeoutMs, opts.label) : getErrorMessage(err));
+}
+
 /**
  * `fetch` with a timeout, wrapping a timeout or network failure via `wrap`.
  * Any `signal` in `init` is replaced by the timeout.
@@ -53,7 +58,22 @@ export async function vendorFetch(
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(opts.timeoutMs) });
   } catch (err) {
-    const timedOut = err instanceof Error && err.name === "TimeoutError";
-    throw opts.wrap(0, timedOut ? noResponseMessage(opts.timeoutMs, opts.label) : getErrorMessage(err));
+    throw wrapFailure(err, opts);
+  }
+}
+
+/**
+ * The body of a `vendorFetch` response, read under the SAME wrap.
+ *
+ * ⛔ The timeout signal covers the body as well as the headers, so a vendor
+ * that answers headers and then stalls aborts inside `res.text()`, and a bare
+ * `await res.text()` let that escape as a raw DOMException, past every
+ * caller's `instanceof XxxError` handling. Pass the options the fetch used.
+ */
+export async function vendorText(res: Response, opts: VendorFetchOptions): Promise<string> {
+  try {
+    return await res.text();
+  } catch (err) {
+    throw wrapFailure(err, opts);
   }
 }

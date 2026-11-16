@@ -42,7 +42,7 @@
  */
 
 import { retryAfterHeader } from "./retry.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 /**
  * YouTube refuses `<` and `>` in a title or description: snippet.title and
@@ -181,14 +181,15 @@ async function request<T>(
 ): Promise<T> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const resOpts: VendorFetchOptions = { timeoutMs, wrap: wrapAs(method, path) };
   const res = await vendorFetch(
     `${opts.base ?? API_BASE}${path}`,
     { method, headers: { Authorization: `Bearer ${accessToken}` } },
-    { timeoutMs, wrap: wrapAs(method, path) },
+    resOpts,
   );
   // DELETE returns 204 with no body on success — nothing to parse.
   if (res.status === 204) return undefined as T;
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) throw new YouTubeError(res.status, text, method, path, retryAfterHeader(res));
   if (!text) return undefined as T;
   try {
@@ -300,6 +301,7 @@ export async function insertVideo(input: YouTubeUploadInput): Promise<YouTubeVid
     },
   };
 
+  const initResOpts: VendorFetchOptions = { timeoutMs: INIT_UPLOAD_TIMEOUT_MS, wrap: wrapAs("POST", "/upload/videos (init)") };
   const initRes = await vendorFetch(
     `${UPLOAD_BASE}?uploadType=resumable&part=snippet,status`,
     {
@@ -312,10 +314,10 @@ export async function insertVideo(input: YouTubeUploadInput): Promise<YouTubeVid
       },
       body: JSON.stringify(metadata),
     },
-    { timeoutMs: INIT_UPLOAD_TIMEOUT_MS, wrap: wrapAs("POST", "/upload/videos (init)") },
+    initResOpts,
   );
   if (!initRes.ok) {
-    const text = await initRes.text();
+    const text = await vendorText(initRes, initResOpts);
     throw new YouTubeError(initRes.status, text, "POST", "/upload/videos (init)");
   }
   const uploadUrl = initRes.headers.get("location");
@@ -328,6 +330,7 @@ export async function insertVideo(input: YouTubeUploadInput): Promise<YouTubeVid
     );
   }
 
+  const uploadResOpts: VendorFetchOptions = { timeoutMs: UPLOAD_TIMEOUT_MS, wrap: wrapAs("PUT", "/upload/videos (bytes)") };
   const uploadRes = await vendorFetch(
     uploadUrl,
     {
@@ -338,7 +341,7 @@ export async function insertVideo(input: YouTubeUploadInput): Promise<YouTubeVid
       },
       body: input.videoBytes,
     },
-    { timeoutMs: UPLOAD_TIMEOUT_MS, wrap: wrapAs("PUT", "/upload/videos (bytes)") },
+    uploadResOpts,
   );
   if (uploadRes.status === 308) {
     // "Resume Incomplete" — only a chunked client can recover from this by
@@ -352,7 +355,7 @@ export async function insertVideo(input: YouTubeUploadInput): Promise<YouTubeVid
       "/upload/videos (bytes)",
     );
   }
-  const text = await uploadRes.text();
+  const text = await vendorText(uploadRes, uploadResOpts);
   if (!uploadRes.ok) {
     throw new YouTubeError(uploadRes.status, text, "PUT", "/upload/videos (bytes)");
   }

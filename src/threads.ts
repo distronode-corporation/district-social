@@ -9,7 +9,7 @@ import {
 } from "./meta-graph.js";
 import { graphTime, type RecentPostsPage } from "./recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 /**
  * Threads Graph API vendor client (graph.threads.net).
@@ -224,6 +224,10 @@ async function request<T>(
   const usesQuery = method === "GET" || method === "DELETE";
   const url = usesQuery ? `${base}?${fields.toString()}` : base;
 
+  const responseOpts: VendorFetchOptions = {
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    wrap: (status, message) => new ThreadsError(message, status, null, null, null, null),
+  };
   const response = await vendorFetch(
     url,
     {
@@ -232,13 +236,10 @@ async function request<T>(
         ? {}
         : { headers: { "content-type": "application/x-www-form-urlencoded" }, body: fields.toString() }),
     },
-    {
-      timeoutMs: REQUEST_TIMEOUT_MS,
-      wrap: (status, message) => new ThreadsError(message, status, null, null, null, null),
-    },
+    responseOpts,
   );
 
-  const text = await response.text();
+  const text = await vendorText(response, responseOpts);
   let parsed: unknown;
   try {
     parsed = text ? JSON.parse(text) : {};

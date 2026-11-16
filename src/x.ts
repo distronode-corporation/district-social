@@ -28,7 +28,7 @@
 
 import type { RecentPostsPage } from "./recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 const BASE_URL = "https://api.x.com/2";
 
@@ -116,6 +116,7 @@ async function token(): Promise<string> {
 async function request<T>(method: string, path: string, opts: { body?: unknown; timeoutMs?: number } = {}): Promise<T> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const resOpts: VendorFetchOptions = { timeoutMs, wrap: (status, message) => new XError(status, message, method, path) };
   const res = await vendorFetch(
     `${BASE_URL}${path}`,
     {
@@ -126,9 +127,9 @@ async function request<T>(method: string, path: string, opts: { body?: unknown; 
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     },
-    { timeoutMs, wrap: (status, message) => new XError(status, message, method, path) },
+    resOpts,
   );
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) throw new XError(res.status, text, method, path, retryAfterHeader(res));
   if (!text) return undefined as T;
   try {
@@ -150,16 +151,17 @@ async function request<T>(method: string, path: string, opts: { body?: unknown; 
 async function mediaUploadRequest<T>(form: FormData, opts: { timeoutMs?: number } = {}): Promise<T> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? MEDIA_UPLOAD_TIMEOUT_MS;
+  const resOpts: VendorFetchOptions = {
+    timeoutMs,
+    label: "media upload",
+    wrap: (status, message) => new XError(status, message, "POST", "/media/upload"),
+  };
   const res = await vendorFetch(
     `${BASE_URL}/media/upload`,
     { method: "POST", headers: { Authorization: `Bearer ${accessToken}` }, body: form },
-    {
-      timeoutMs,
-      label: "media upload",
-      wrap: (status, message) => new XError(status, message, "POST", "/media/upload"),
-    },
+    resOpts,
   );
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) {
     throw new XError(res.status, text, "POST", "/media/upload", retryAfterHeader(res));
   }
@@ -173,16 +175,17 @@ async function mediaUploadRequest<T>(form: FormData, opts: { timeoutMs?: number 
 
 async function mediaStatusRequest(mediaId: string): Promise<XMediaUploadResponse> {
   const accessToken = await token();
+  const resOpts: VendorFetchOptions = {
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    label: "media status",
+    wrap: (status, message) => new XError(status, message, "GET", "/media/upload"),
+  };
   const res = await vendorFetch(
     `${BASE_URL}/media/upload?command=STATUS&media_id=${encodeURIComponent(mediaId)}`,
     { method: "GET", headers: { Authorization: `Bearer ${accessToken}` } },
-    {
-      timeoutMs: REQUEST_TIMEOUT_MS,
-      label: "media status",
-      wrap: (status, message) => new XError(status, message, "GET", "/media/upload"),
-    },
+    resOpts,
   );
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) {
     throw new XError(res.status, text, "GET", "/media/upload", retryAfterHeader(res));
   }

@@ -27,7 +27,7 @@
 
 import type { RecentPostsPage } from "./recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 /**
  * Production by default. `PINTEREST_API_BASE` exists for exactly one reason and
@@ -147,6 +147,7 @@ async function request<T>(
 ): Promise<T> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const resOpts: VendorFetchOptions = { timeoutMs, wrap: (status, message) => new PinterestError(status, message, method, path) };
   const res = await vendorFetch(
     `${BASE_URL}${path}`,
     {
@@ -157,11 +158,11 @@ async function request<T>(
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     },
-    { timeoutMs, wrap: (status, message) => new PinterestError(status, message, method, path) },
+    resOpts,
   );
   // DELETE returns 204 with no body on success — nothing to parse.
   if (res.status === 204) return undefined as T;
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) throw new PinterestError(res.status, text, method, path, retryAfterHeader(res));
   if (!text) return undefined as T;
   try {

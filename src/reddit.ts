@@ -27,7 +27,7 @@ import type { Agent as UndiciAgent } from "undici";
 import { preparePinnedHttpsFetch } from "./ssrf.js";
 import { retryAfterHeader } from "./retry.js";
 import { engineDeployment } from "./settings.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 const BASE_URL = "https://oauth.reddit.com";
 
@@ -226,6 +226,7 @@ async function request<T>(
   const form = opts.form;
   if (form) form.set("raw_json", "1");
 
+  const resOpts: VendorFetchOptions = { timeoutMs, wrap: (status, message) => new RedditError(status, message, method, path) };
   const res = await vendorFetch(
     url,
     {
@@ -237,9 +238,9 @@ async function request<T>(
       },
       body: form ? form.toString() : undefined,
     },
-    { timeoutMs, wrap: (status, message) => new RedditError(status, message, method, path) },
+    resOpts,
   );
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) {
     const retryAfter = retryAfterHeader(res) ?? rateLimitReset(res);
     const body =

@@ -21,7 +21,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { retryAfterHeader } from "./retry.js";
-import { vendorFetch } from "./vendor-fetch.js";
+import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
 
 /**
  * `LinkedIn-Version` header value, `YYYYMM`. VERIFIED against the Posts,
@@ -297,6 +297,7 @@ interface RequestResult<T> {
 async function request<T>(method: string, path: string, opts: RequestOpts = {}): Promise<RequestResult<T>> {
   const token = await getToken();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const resOpts: VendorFetchOptions = { timeoutMs, wrap: (status, message) => new LinkedInError(status, message, method, path) };
   let res: Response;
   try {
     res = await vendorFetch(
@@ -313,14 +314,14 @@ async function request<T>(method: string, path: string, opts: RequestOpts = {}):
         },
         body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       },
-      { timeoutMs, wrap: (status, message) => new LinkedInError(status, message, method, path) },
+      resOpts,
     );
   } catch (err) {
     logLinkedInCall({ method, path: `${BASE_PATH}${path}`, status: null, liUuid: null });
     throw err;
   }
   logLinkedInCall({ method, path: `${BASE_PATH}${path}`, status: res.status, liUuid: res.headers.get("x-li-uuid") });
-  const text = await res.text();
+  const text = await vendorText(res, resOpts);
   if (!res.ok) throw new LinkedInError(res.status, text, method, path, retryAfterHeader(res));
   if (!text) return { data: undefined as T, headers: res.headers };
   try {
@@ -599,6 +600,11 @@ export async function initializeImageUpload(): Promise<LinkedInImageUpload> {
  */
 export async function uploadImageBytes(uploadUrl: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string): Promise<void> {
   const token = await getToken();
+  const resOpts: VendorFetchOptions = {
+    timeoutMs: UPLOAD_TIMEOUT_MS,
+    label: "image upload",
+    wrap: (status, message) => new LinkedInError(status, message, "PUT", "(uploadUrl)"),
+  };
   let res: Response;
   try {
     res = await vendorFetch(
@@ -612,11 +618,7 @@ export async function uploadImageBytes(uploadUrl: string, bytes: Uint8Array<Arra
         // every runtime this ships to.
         body: new Blob([bytes], { type: mimeType }),
       },
-      {
-        timeoutMs: UPLOAD_TIMEOUT_MS,
-        label: "image upload",
-        wrap: (status, message) => new LinkedInError(status, message, "PUT", "(uploadUrl)"),
-      },
+      resOpts,
     );
   } catch (err) {
     logLinkedInCall({ method: "PUT", path: "(image upload URL)", status: null, liUuid: null });
@@ -625,7 +627,7 @@ export async function uploadImageBytes(uploadUrl: string, bytes: Uint8Array<Arra
   // The pre-signed URL is never logged: its query string is the upload credential.
   logLinkedInCall({ method: "PUT", path: "(image upload URL)", status: res.status, liUuid: res.headers.get("x-li-uuid") });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = await vendorText(res, resOpts).catch(() => "");
     throw new LinkedInError(res.status, text, "PUT", "(uploadUrl)");
   }
 }
