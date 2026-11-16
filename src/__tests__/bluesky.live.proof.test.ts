@@ -21,8 +21,7 @@
  *                                 leading "@" is stripped by the engine)
  *   BLUESKY_APP_PASSWORD          an app password for that account
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/bluesky.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/bluesky.live.proof.test.ts
  *
  * ⛔ BEFORE RUNNING, KNOW THE BUDGET: createSession is capped at 10 per 24h per
  * account, and if this is the account a live deployment also publishes with, an

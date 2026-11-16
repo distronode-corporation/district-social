@@ -3,10 +3,11 @@ Researched 2026-07-19 for an automated post-formatting tool (B2B SaaS).
 Tags: **[verified]** = confirmed via web search/fetch this session (often multiple sources cross-checked).
 **[training]** = prior knowledge, not independently re-verified this session — treat as lower confidence.
 
-**Reconciled 2026-08-03** against the nine direct vendor transports in `src/lib/social-hq/engine/`
+**Reconciled 2026-08-03** against the nine direct vendor transports there were then, in `src/`
 (`bluesky.ts`, `linkedin.ts`, `pinterest.ts`, `http/meta-graph.ts` + `facebook-transport.ts` /
 `instagram-transport.ts` / `threads-transport.ts`, `x.ts`, `reddit.ts`, `youtube.ts`, and each
-transport's own `channelRules()`), which are replacing Postiz as the publishing path one
+transport's own `channelRules()`); TikTok, the tenth (`tiktok.ts` + `tiktok-transport.ts`), came
+later and has its own section (10) below. Those transports are replacing Postiz as the publishing path one
 platform at a time. Their docblocks name, per fact, exactly what was checked against the
 vendor's own documentation and what was merely assumed — a strictly better source than parts
 of this file's original research pass, which in several places turned out to have been
@@ -395,10 +396,8 @@ come back as errors naming the fix; a 429's `x-ratelimit-reset` is the retry del
   description (`github.com/pinterest/api-description`, `v5/openapi.yaml`) and the generated
   Python client's model docs," and `CreatePinInput.description`'s own comment is explicit:
   "Vendor cap is 800 chars (openapi.yaml `PinCreate.description`), not the 500 some docs
-  quote." `pinterest-transport.ts`'s `channelRules()` enforces **800** going forward.
-  ⚠️ `specs.ts` (`SPECS.pinterest.maxChars`) still carries the old **500** — it has not been
-  updated to match this transport, so today the code's own enforced limit is narrower than
-  Pinterest truly allows. That is a gap in the code, not in this doc.
+  quote." `pinterest-transport.ts`'s `channelRules()` and `specs.ts`
+  (`SPECS.pinterest.maxChars`) both enforce **800**.
 - Title: **100** chars **[vendor-verified in code, 2026-08-02]** — same OpenAPI verification
   pass as the description cap above (`pinterest.ts`'s module docblock names "the 800/100 char
   caps" together). Previously tagged [verified live] from Postiz's schema only; the number is
@@ -445,8 +444,8 @@ come back as errors naming the fix; a 429's `x-ratelimit-reset` is the retry del
 - Pinterest is a **search engine**, not a social feed. Plain keyword-rich copy describing
   what the image shows and what the reader gets beats conversational voice.
 - The feed shows the **image and title**, not the description. The hook belongs in the
-  title; the description (800 chars per the vendor, see Hard limits above — `specs.ts`
-  currently still caps it at the old 500) is secondary context and keywords.
+  title; the description (800 chars per the vendor, see Hard limits above) is secondary
+  context and keywords.
 - Pins have a long tail (months, not hours), so evergreen explainers outperform
   time-bound announcements.
 
@@ -480,10 +479,54 @@ come back as errors naming the fix; a 429's `x-ratelimit-reset` is the retry del
 
 ---
 
+## 10. TIKTOK
+
+Added after the 2026-08-03 reconciliation. Every figure here is the one `specs.ts`
+(`SPECS.tiktok`) and `tiktok-transport.ts`'s `channelRules()` both declare, which
+`specs-transport-drift.test.ts` holds equal. The vendor quotes are from TikTok API for Business's
+"Publish a public video post" doc, as `tiktok-transport.ts`'s limits docblock cites it; the
+**[vendor-verified in code]** tags below carry no date because that check did not record one.
+
+### Hard limits
+- Caption: **2,200** characters, counted in UTF-16 code units ("Length limit: 2,200 characters
+  (UTF-16 encoding)") **[vendor-verified in code]**. Zernio's own documented caption cap
+  (`zernio-aggregator.ts` RULES, from its OpenAPI `TikTokPlatformData`) matches while it holds
+  the route.
+- Media: **one video, and only a video** is MANDATORY. No video, no post; no images, no mixed
+  media.
+- Video size: **1 GB** ("The maximum video size is 1 GB"), declared as 10^9 bytes, the smaller
+  reading **[vendor-verified in code]**.
+- Video duration: **600 s** ("the maximum video duration is 600 seconds", same doc), the most
+  any account gets. The real cap is per account (`max_video_post_duration_sec` from
+  `/business/video/settings/`) and can be shorter **[vendor-verified in code]**.
+- Enforced only by TikTok, not expressible in `channelRules()`: at least 3 seconds, 360 px on
+  each side, 23 to 60 fps, and .mp4/.mov/.webm.
+- No title, no first comment, no threads.
+
+### Publishing behaviour
+- ⛔ **A publish is a task, not a post.** `/business/video/publish/` answers a `share_id`, and
+  TikTok downloads, checks and publishes the video afterwards, which can take up to an hour.
+  The transport never throws on that uncertainty after the create succeeds; postFacts and the
+  reconcile give the verdict.
+- ⛔ **Public only.** The endpoint takes no privacy level, so a leg is live to everyone the
+  moment it completes. There is no private-first option as YouTube has.
+- ⚠️ **No delete.** The API has no endpoint to delete a video post, so `deletePost` refuses
+  with the one instruction that works: delete it in the TikTok app.
+
+### Optimal formatting
+- The caption overlays the video and folds after roughly two lines on a phone **[training]**
+  (`truncationPoint: 100`), so the first line is the hook and must work alone.
+- **3-5 hashtags at the end**; they are clickable and feed TikTok search.
+- Links in captions are **not clickable**: point to the link in the profile instead.
+- Every post is labelled as promoting the operator's own business (TikTok's Brand organic
+  disclosure), so the copy must not pretend to be anything else.
+
+---
+
 ## ENGAGEMENT MECHANICS (researched 2026-07-25)
 
 This file was formatting-first; these are the behavioural findings that drive the
-deterministic playbook layer (`src/lib/social-hq/engine/playbook.ts`). Anything here that
+deterministic playbook layer (`src/playbook.ts`). Anything here that
 changes a placement decision is encoded in code, not left to the formatter prompt.
 
 ### LinkedIn: there is NO free link placement **[verified 2026-07-25]**
@@ -512,7 +555,7 @@ changes a placement decision is encoded in code, not left to the formatter promp
 - Premium accounts see materially more reach per post, so long-form roots are worth
   using where the content earns it.
 - URLs count as a flat 23 characters to X, however long, and emoji and CJK count 2
-  (`xWeightedLength` in `engine/length.ts`). An older `max(weighted, raw)` count, which
+  (`xWeightedLength` in `src/length.ts`). An older `max(weighted, raw)` count, which
   charged a UTM-stamped link in full, is gone.
 
 ### Follow-up delay (per-item timing): STILL UNVERIFIED
@@ -520,7 +563,7 @@ changes a placement decision is encoded in code, not left to the formatter promp
   after its root. No platform's timing for this has been proven here.
 - It is also unobservable on failure: a root that publishes while its delayed follow-up
   silently never lands can look like success.
-- Therefore `PLAYBOOK_TUNING` (`engine/playbook.ts`) ships every delay at **0** (immediate
+- Therefore `PLAYBOOK_TUNING` (`src/playbook.ts`) ships every delay at **0** (immediate
   chaining, which is the verified behaviour and already satisfies "a comment after the
   post"), and a test pins it there. To change that, prove the follow-up timing with a live
   publish, verify it by hand, and record the result HERE before touching the tuning table.
@@ -547,6 +590,7 @@ content-addressed by sha256, so a true re-run of the same post reuses one asset)
 | Reddit | Title 300 / body ~40,000 (unverified placeholder — old "10,000, verified" was a Postiz artifact) | none formal | rarely used | n/a | Link posts more promotional-flagged than text posts; subreddit-dependent |
 | Bluesky | 300 (graphemes) | none formal | minimal | n/a (no "more" truncation) | No official penalty found, but raw URLs eat full char budget unless facet-truncated |
 | Pinterest | Title 100 / desc **800** (both vendor-verified 2026-08-02 against Pinterest's OpenAPI spec; old "500, verified live" was a Postiz artifact) | none formal (deprecated) | **0** | n/a (feed shows image + title) | N/A — description links are dead text; the destination is a separate `link` setting |
+| TikTok | Caption 2,200 (UTF-16); one video only, 1 GB, 600 s | none formal | 3-5, end-placed | ~100 chars (folds after ~2 lines) | N/A: caption links are not clickable; point to the profile link |
 
 ---
 

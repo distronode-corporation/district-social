@@ -22,8 +22,7 @@
  *   THREADS_APP_SECRET            the app secret for appsecret_proof
  *                                 (META_APP_SECRET is read if this is unset)
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/threads.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/threads.live.proof.test.ts
  */
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getPermalink, isThreadsNotFound, setThreadsCredentialsResolver } from "../threads.js";

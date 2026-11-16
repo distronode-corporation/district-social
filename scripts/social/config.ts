@@ -25,7 +25,7 @@ export interface SocialHqConfig {
   api?: ApiConfig;
   /**
    * The Vertex project for Veo (video); VERTEX_PROJECT_ID wins over it. There
-   * is no default project. Text runs on Claude (engine/claude.ts) and takes no
+   * is no default project. Text runs on Claude (src/claude.ts) and takes no
    * model setting: an old config.json's `location` and `model` are ignored.
    */
   vertex: { project: string };
@@ -37,7 +37,7 @@ export interface SocialHqConfig {
   };
   /**
    * Claude by Anthropic workload identity federation instead of the key
-   * (engine/anthropic-wif.ts). Absent: ANTHROPIC_API_KEY. Present: all five
+   * (src/anthropic-wif.ts). Absent: ANTHROPIC_API_KEY. Present: all five
    * are required, and the key is never read again.
    */
   anthropicWif?: AnthropicWifConfig;
@@ -59,7 +59,7 @@ export interface AnthropicWifConfig {
   idTokenServiceAccount: string;
 }
 
-/** Each config.json field and the engine variable it becomes (engine/anthropic-wif.ts). */
+/** Each config.json field and the engine variable it becomes (src/anthropic-wif.ts). */
 const WIF_CONFIG_ENV: ReadonlyArray<readonly [keyof AnthropicWifConfig, string]> = [
   ["federationRuleId", "ANTHROPIC_FEDERATION_RULE_ID"],
   ["organizationId", "ANTHROPIC_ORGANIZATION_ID"],
@@ -85,7 +85,7 @@ export function loadConfig(): SocialHqConfig {
   }
   const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
   // Every override here must name the variable the ENGINE reads
-  // (engine/settings.ts), or the CLI reports a configuration the engine never
+  // (src/settings.ts), or the CLI reports a configuration the engine never
   // used.
   _config = {
     ...raw,

@@ -37,8 +37,7 @@
  *   YOUTUBE_REFRESH_TOKEN                minted by an account that manages
  *                                        the channel
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/youtube.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/youtube.live.proof.test.ts
  *
  * ⚠️ Two credential traps that are about Google, not this code. Service
  * accounts do not work: the YouTube Data API does not support the

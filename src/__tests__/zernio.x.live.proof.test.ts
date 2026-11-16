@@ -22,8 +22,7 @@ import { requireEnv } from "./helpers/proof-env.js";
  *   ZERNIO_API_KEY                the Zernio API key
  *   ZERNIO_X_EXPECTED_ACCOUNT     the X username (no "@") the key posts as
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/zernio.x.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/zernio.x.live.proof.test.ts
  *
  * ## The budget, and why the copy below is the way it is
  *

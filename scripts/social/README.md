@@ -4,7 +4,7 @@ A command-line client for a **Social HQ agent API** (`/api/internal/social/*`):
 draft a post, QA it, check it before approval, publish it on a person's
 approval, and read the evidence of what went out. Every command is an HTTPS
 call to the API; the drafts live behind it, formatted, checked and published by
-the same engine (`src/lib/social-hq/engine/`) as Social HQ's composer. It is
+the same engine (this repository's `src/`) as Social HQ's composer. It is
 built to be driven by an AI agent and by a person in a terminal.
 
 The CLI holds no vendor credential and reads no database. It cannot publish
@@ -15,17 +15,18 @@ anything the API would refuse.
 instagram · facebook · threads · twitter (X) · linkedin · youtube · reddit ·
 bluesky · pinterest · tiktok
 
-The list is `ALL_PLATFORMS` in `engine/types.ts`; that is the source of truth,
+The list is `ALL_PLATFORMS` in `src/types.ts`; that is the source of truth,
 and this heading is the count of it. A platform publishes only when the API's
 host has its transport routed and its credential resolves; `accounts` reads
 exactly that state.
 
 ## Running it
 
-The CLI runs through `tsx` in a host package that resolves the `@/` import
-alias (`@/lib/social-hq/engine`) from its `tsconfig.json`, and uses that host's
-`node_modules` (`tsx`, `commander`, `google-auth-library`). There is no separate
-install.
+The CLI runs through `tsx` from this repository's own install: run `npm ci` at
+the repository root, and `bin/social` uses that `node_modules` (`tsx`,
+`commander`, `google-auth-library`) and the root `tsconfig.json`. It imports
+the engine by relative path (`../../src/index.js`), with no import alias.
+There is no separate install for the CLI.
 
 ```
 bin/social <command> [options]
@@ -78,8 +79,10 @@ entry injects both or the env sets them.
 The CLI sends `Authorization: Bearer <Google ID token>`, minted by this
 machine's Application Default Credentials (`GoogleAuth().getIdTokenClient`) for
 the configured audience. The API decides which identities it admits (for an
-agent, typically a service account the agent's ADC impersonates). Nothing is
-read from a file or a secret, and one token is minted per run. A person's own
+agent, typically a service account the agent's ADC impersonates). The CLI
+itself reads no key or secret; ADC may read the credential file it is
+configured with (`GOOGLE_APPLICATION_CREDENTIALS`, or gcloud's application
+default credentials file). One token is minted per run. A person's own
 ADC mints a token for that person, which an API that admits only agent
 identities refuses with 401, as it should.
 
@@ -92,8 +95,8 @@ before a token is minted (`pinnedBaseUrl` and `configuredOrigin` in `api.ts`).
 
 ## Commands
 
-`new`, `list`, `show`, `qa`, `preflight`, `publish`, `unschedule` and
-`accounts` take `--json` to print the API's answer as is.
+Every command except `profiles` can print the API's answer as JSON:
+`evidence` always does, and the rest take `--json`.
 
 | command | API call | what it does |
 |---|---|---|
@@ -177,17 +180,17 @@ counts.
 
 ## How formatting works (on the API's host)
 
-- `engine/specs.ts` encodes per-platform hard limits and best practice
+- `src/specs.ts` encodes per-platform hard limits and best practice
   (provenance in `platform-reference.md`).
-- `engine/format.ts` sends the source post, the brand brief and the platform
+- `src/format.ts` sends the source post, the brand brief and the platform
   rules to Claude (structured output) and gets one tailored render per
   platform (content, title, first comment, thread items, subreddit, media
   selection). It also writes image alt text.
-- `engine/qa.ts` runs deterministic validators (limits, media rules, hashtag
+- `src/qa.ts` runs deterministic validators (limits, media rules, hashtag
   caps, link penalties, the brand pack's own gates) plus an LLM review pass
   (factual drift, typos, tone, hooks), stored on the draft as a pass/fail
   report.
-- `engine/publish.ts` hands each render to that platform's direct transport
+- `src/publish.ts` hands each render to that platform's direct transport
   (`transport.ts`, then `*-transport.ts`), which uploads media through the
   platform's own API and creates the post there.
 
@@ -205,7 +208,7 @@ config.example.json     template, copy to config.json
 platform-reference.md   researched platform facts and provenance
 ```
 
-Engine, in `src/lib/social-hq/engine/`:
+Engine, in `src/`:
 
 ```
 specs.ts                per-platform limits and guidance

@@ -32,8 +32,7 @@
  *   LINKEDIN_ORG_ID                numeric id of the ONE organization this
  *                                  proof may post to
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/linkedin.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/linkedin.live.proof.test.ts
  *
  * ⛔ The access token is a live publish credential. Keep it out of any file
  * under the repository (editor history and backup tools shadow-copy those) and

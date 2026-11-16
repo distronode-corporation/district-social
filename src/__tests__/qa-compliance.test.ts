@@ -150,7 +150,7 @@ describe("complianceChecks", () => {
      * The gate warned on any Quebec mention because "the French-language site
      * and UI do not exist yet (Bill 96)". FR_LAUNCHED went true on 2026-09-08
      * and the whole public site now has an indexed French twin at /fr, so the
-     * premise is false and the gate is deleted (src/lib/social-hq/engine/qa.ts).
+     * premise is false and the gate is deleted (src/qa.ts).
      *
      * ⚠️ These are `not.toContain` assertions ON PURPOSE, the same shape the
      * expired residency claims use: a copy-paste that revives the gate reds CI

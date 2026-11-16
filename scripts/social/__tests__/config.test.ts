@@ -43,7 +43,7 @@ const BASE = {
 
 const ENGINE_VARS = ["VERTEX_PROJECT_ID", "SOCIALMETA_DEFAULT_SUBREDDIT"] as const;
 
-/** The engine's WIF variables (engine/anthropic-wif.ts) the anthropicWif block becomes. */
+/** The engine's WIF variables (src/anthropic-wif.ts) the anthropicWif block becomes. */
 const WIF_VARS = [
   "ANTHROPIC_FEDERATION_RULE_ID",
   "ANTHROPIC_ORGANIZATION_ID",

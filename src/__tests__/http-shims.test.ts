@@ -1,6 +1,6 @@
 /**
  * The three old helper paths (vendor-fetch, retry, meta-graph) are shims over
- * engine/http/. Each must hand out the SAME bindings
+ * src/http/. Each must hand out the SAME bindings
  * as its http/ module, not a copy: `instanceof MetaGraphError` and the
  * `setMetaCredentialsResolver` singleton only work when both paths resolve to
  * one module instance.

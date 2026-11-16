@@ -28,8 +28,7 @@
  *   META_IG_USER_ID                 the IG business account to post to
  *   PROOF_IMAGE_URL                 a public .jpg
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/instagram.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/instagram.live.proof.test.ts
  */
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { graphRequest, setMetaCredentialsResolver, META_GRAPH_VERSION, appsecretProof } from "../meta-graph.js";

@@ -40,8 +40,7 @@
  *   META_PAGE_ID                   the Page to post to
  *   PROOF_IMAGE_URL                optional: a public image, enables the photo test
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/facebook.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/facebook.live.proof.test.ts
  */
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { graphRequest, setMetaCredentialsResolver, META_GRAPH_VERSION, appsecretProof } from "../meta-graph.js";

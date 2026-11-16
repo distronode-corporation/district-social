@@ -41,8 +41,7 @@ import { requireEnv } from "./helpers/proof-env.js";
  *   ZERNIO_REDDIT_SUBREDDIT           a subreddit you moderate, without "r/"
  *   ZERNIO_REDDIT_EXPECTED_ACCOUNT    the Reddit username the key posts as
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/zernio.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/zernio.live.proof.test.ts
  *
  * ⚠️ Zernio dedupes on a content hash of (platform, accountId, content+media)
  * over a 24-HOUR window and answers 409. Every post below is stamped, so a

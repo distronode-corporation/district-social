@@ -1,9 +1,11 @@
-# district-social publish scope: the files that leave this repository for the public package.
+# district-social publish scope, as read in the host package this engine is developed in: the
+# files that leave that package for this public repository.
 #
-# Paths are relative to the website root. A file is in scope when an include matches it and no
-# exclude does ("**" crosses directories, "*" does not). Everything in scope must pass the scrub
-# gate (scripts/district-social-scrub.mjs) at zero hits, and the public repository is seeded from
-# exactly this list.
+# Paths are relative to the host package's root, not to this repository: the first include is
+# where the engine lives there (it is src/ here), and scripts/social/ is the same path in both.
+# A file is in scope when an include matches it and no exclude does ("**" crosses directories,
+# "*" does not). Everything in scope must pass the host's scrub gate at zero hits, and this
+# repository is seeded from exactly this list.
 
 include src/lib/social-hq/engine/**
 include scripts/social/**

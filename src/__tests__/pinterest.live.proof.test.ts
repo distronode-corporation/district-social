@@ -36,8 +36,7 @@
  *   PROOF_IMAGE_URL                 a public .png or .jpg
  *   PROOF_LINK_URL                  the pin's click-through URL
  *
- *   npx vitest run src/lib/social-hq/engine/__tests__/pinterest.live.proof.test.ts \
- *     --project=node
+ *   npx vitest run src/__tests__/pinterest.live.proof.test.ts
  *
  * ⛔ DO NOT OBTAIN THE BEARER BY REDEEMING THE REFRESH TOKEN. Pinterest ROTATES
  * the refresh token on every redemption, so a manual refresh outside the
