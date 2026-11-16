@@ -239,23 +239,25 @@ describe("bluesky transport", () => {
     });
 
     /**
-     * ⚠️ A library asset can exist with no public URL, and there is nothing to
-     * fetch for it. Skipping it must not take the post down or drop the assets
-     * either side of it: `fetch(undefined)` would reject and the whole publish
-     * would fail over an asset that was never sendable in the first place.
+     * ⛔ A selected asset with no public URL is REFUSED by name, before any
+     * post. Skipping it published the post without it, with a real id, so
+     * nothing downstream noticed the image was gone.
      */
-    it("skips an asset with no fetchable URL and still uploads the rest", async () => {
+    it("refuses a selected asset with no public URL instead of posting without it", async () => {
       (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response(new Uint8Array([2])));
       uploadBlobMock.mockResolvedValue({ ref: "blob-ok" });
-      createPostMock.mockResolvedValue({ uri: "at://did:plc:x/app.bsky.feed.post/root", cid: "cid-root" });
 
-      await blueskyTransport.publishNow(
-        input({ media: [media({ url: undefined }), media({ url: "https://cdn.example.com/second.png" })] }),
-      );
-
-      expect(fetch).toHaveBeenCalledTimes(1);
-      expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/second.png", expect.any(Object));
-      expect(uploadBlobMock).toHaveBeenCalledTimes(1);
+      await expect(
+        blueskyTransport.publishNow(
+          input({
+            media: [media({ url: "https://cdn.example.com/first.png" }), media({ path: "/lib/second.png", url: undefined })],
+          }),
+        ),
+      ).rejects.toMatchObject({
+        name: "PublishPreflightError",
+        message: expect.stringContaining("bluesky: media asset /lib/second.png has no public url"),
+      });
+      expect(createPostMock).not.toHaveBeenCalled();
     });
 
     /**

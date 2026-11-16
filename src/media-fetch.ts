@@ -21,6 +21,9 @@
  */
 
 import { readCappedBody } from "./read-capped.js";
+import { getErrorMessage } from "./error-message.js";
+import { PublishPreflightError } from "./publish.js";
+import type { MediaAsset } from "./types.js";
 
 /**
  * Fetching an already-compressed image asset should be fast. Twenty seconds is
@@ -60,14 +63,52 @@ export async function fetchMediaBytes(
   url: string,
   opts: MediaFetchOptions = {},
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(opts.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS) });
+  const timeoutMs = opts.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS;
+  /**
+   * ⛔ A FAILED MEDIA FETCH IS NOT AN UNKNOWN OUTCOME. It runs before the
+   * vendor create, so nothing was posted, but the raw TimeoutError or fetch
+   * TypeError reads as one to retry.ts (`isUnknownOutcome`), and publish.ts
+   * then marks the leg `failed` with "the post may already be live". Wrapped
+   * as a plain platform-prefixed Error, the leg stays `pending` instead.
+   */
+  const failed = (err: unknown): Error => {
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    const why = timedOut ? `timed out after ${timeoutMs / 1000}s` : getErrorMessage(err);
+    return new Error(`${platform}: failed to fetch media asset (${why}): ${url}`);
+  };
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    throw failed(err);
+  }
   if (!res.ok) {
     throw new Error(`${platform}: failed to fetch media asset (${res.status}): ${url}`);
   }
-  const capped = await readCappedBody(res, opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES);
+  const capped = await readCappedBody(res, opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES).catch((err: unknown) => {
+    throw failed(err);
+  });
   if (!capped.ok) {
     const maxBytes = opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES;
     throw new Error(`${platform}: media asset exceeds the fetch byte cap (${maxBytes} bytes): ${url}`);
   }
   return capped.bytes;
+}
+
+/**
+ * A selected asset's public URL, or a refusal naming it.
+ *
+ * ⛔ A selected asset with no URL used to be skipped (`continue`), which
+ * published the post without it, or text-only, with a real id, so nothing
+ * downstream noticed. publish.ts uploads every selected asset first, so a
+ * missing URL here is a broken asset, and the leg is refused before any send.
+ */
+export function requireMediaUrl(platform: string, asset: MediaAsset): string {
+  if (!asset.url) {
+    throw new PublishPreflightError(
+      `${platform}: media asset ${asset.path} has no public url, so it cannot be published. ` +
+        "Re-upload it, or drop it from this render, so the other platforms in this publish can still go out.",
+    );
+  }
+  return asset.url;
 }

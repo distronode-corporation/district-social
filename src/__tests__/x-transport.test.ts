@@ -491,15 +491,37 @@ describe("x transport: non-Error failures, alt text, url-less assets and media h
     expect(createTweetMock).not.toHaveBeenCalled();
   });
 
-  it("skips a library asset with no public url and uploads the fetchable one", async () => {
+  it.each([
+    ["an image", image({ path: "/lib/a.png", url: undefined })],
+    ["a video", { path: "/lib/a.png", type: "video", mimeType: "video/mp4", size: 1 } as MediaAsset],
+    ["a GIF", { path: "/lib/a.png", type: "gif", mimeType: "image/gif", size: 1 } as MediaAsset],
+  ])("refuses %s with no public url instead of posting without it", async (_label, asset) => {
     fetchMock().mockImplementation(okBytes);
     uploadImageMock.mockResolvedValue("media-2");
     createTweetMock.mockResolvedValue({ id: "root-2", text: "t" });
 
-    await xTransport.publishNow(input({ media: [image({ url: undefined }), image()] }));
+    await expect(xTransport.publishNow(input({ media: [asset] }))).rejects.toMatchObject({
+      name: "PublishPreflightError",
+      message: expect.stringContaining("x: media asset /lib/a.png has no public url"),
+    });
+    expect(createTweetMock).not.toHaveBeenCalled();
+  });
 
-    expect(uploadImageMock).toHaveBeenCalledTimes(1);
-    expect(createTweetMock).toHaveBeenCalledWith(expect.objectContaining({ mediaIds: ["media-2"] }));
+  it.each([
+    ["video", { path: "/tmp/clip.mp4", type: "video", mimeType: "video/mp4", size: 1, url: "https://cdn.example.com/clip.mp4" }],
+    ["GIF", { path: "/tmp/clip.gif", type: "gif", mimeType: "image/gif", size: 1, url: "https://cdn.example.com/clip.gif" }],
+  ] as Array<[string, MediaAsset]>)("gives a %s's bytes the 120s fetch budget, not the 20s image one", async (_label, asset) => {
+    fetchMock().mockImplementation(okBytes);
+    uploadVideoMock.mockResolvedValue("v");
+    uploadGifMock.mockResolvedValue("g");
+    createTweetMock.mockResolvedValue({ id: "root-2", text: "t" });
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await xTransport.publishNow(input({ media: [asset] }));
+      expect(timeoutSpy).toHaveBeenCalledWith(120_000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it("still posts, and warns with the vendor's message, when alt text cannot be attached", async () => {

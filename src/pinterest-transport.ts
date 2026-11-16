@@ -47,7 +47,7 @@ import type {
 } from "./transport.js";
 import type { MediaAsset } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
-import { fetchMediaBytes } from "./media-fetch.js";
+import { fetchMediaBytes, requireMediaUrl } from "./media-fetch.js";
 
 const MB = 1024 * 1024;
 
@@ -141,14 +141,14 @@ async function collectImages(media: MediaAsset[]): Promise<PinterestImageSource[
   const candidates = media.filter((m) => m.type === "image").slice(0, MAX_IMAGES);
   const out: PinterestImageSource[] = [];
   for (const asset of candidates) {
-    if (!asset.url) continue; // nothing fetchable; a library asset without a public URL cannot be uploaded here
+    const url = requireMediaUrl("pinterest", asset);
     const contentType = CONTENT_TYPE_BY_MIME[asset.mimeType];
     if (!contentType) {
       throw new Error(
         `pinterest: unsupported image mime type "${asset.mimeType}" (Pinterest's media_source only accepts image/jpeg or image/png as base64)`,
       );
     }
-    const bytes = await fetchMediaBytes("pinterest", asset.url);
+    const bytes = await fetchMediaBytes("pinterest", url);
     out.push({ contentType, data: Buffer.from(bytes).toString("base64") });
   }
   return out;

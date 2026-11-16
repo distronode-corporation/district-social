@@ -38,9 +38,16 @@ import type {
 } from "./transport.js";
 import { threadReplies, type MediaAsset } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
-import { fetchMediaBytes } from "./media-fetch.js";
+import { fetchMediaBytes, requireMediaUrl } from "./media-fetch.js";
 
 const MB = 1024 * 1024;
+
+/**
+ * The fetch budget for a video or GIF's bytes. The shared 20s figure is sized
+ * for a compressed image, and X takes video up to 8 GB, so a real clip timed
+ * out on the fetch before the chunked upload began. Same figure as YouTube's.
+ */
+const X_VIDEO_FETCH_TIMEOUT_MS = 120_000;
 
 /** POST /2/tweets `media.media_ids` — vendor cap, verified (maxItems: 4). */
 const MAX_IMAGES = 4;
@@ -183,16 +190,16 @@ function assertNoUnsupportedMedia(media: MediaAsset[]): void {
  */
 async function uploadMediaAssets(media: MediaAsset[]): Promise<string[]> {
   const video = media.find((m) => m.type === "video");
-  if (video?.url) {
-    const bytes = await fetchMediaBytes("x", video.url);
+  if (video) {
+    const bytes = await fetchMediaBytes("x", requireMediaUrl("x", video), { timeoutMs: X_VIDEO_FETCH_TIMEOUT_MS });
     const id = await xUploadVideo(bytes, VIDEO_MIME[video.mimeType]);
     await attachAltText(id, video.altText);
     return [id];
   }
 
   const gif = media.find((m) => m.type === "gif");
-  if (gif?.url) {
-    const bytes = await fetchMediaBytes("x", gif.url);
+  if (gif) {
+    const bytes = await fetchMediaBytes("x", requireMediaUrl("x", gif), { timeoutMs: X_VIDEO_FETCH_TIMEOUT_MS });
     const id = await xUploadGif(bytes, "image/gif");
     await attachAltText(id, gif.altText);
     return [id];
@@ -222,14 +229,14 @@ async function uploadImages(media: MediaAsset[]): Promise<string[]> {
   const candidates = media.filter((m) => m.type === "image").slice(0, MAX_IMAGES);
   const out: string[] = [];
   for (const asset of candidates) {
-    if (!asset.url) continue; // nothing fetchable; a library asset without a public URL cannot be uploaded here
+    const url = requireMediaUrl("x", asset);
     const contentType = CONTENT_TYPE_BY_MIME[asset.mimeType];
     if (!contentType) {
       throw new Error(
         `x: unsupported image mime type "${asset.mimeType}" (x.ts's uploadImage only accepts image/jpeg, image/png or image/webp)`,
       );
     }
-    const bytes = await fetchMediaBytes("x", asset.url);
+    const bytes = await fetchMediaBytes("x", url);
     const mediaId = await xUploadImage(bytes, contentType);
     // X has no alt-text parameter on the upload itself — it is a separate
     // POST /2/media/metadata call; without it this platform would send no alt

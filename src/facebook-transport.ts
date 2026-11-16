@@ -41,6 +41,7 @@ import type {
 } from "./transport.js";
 import type { MediaAsset } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
+import { requireMediaUrl } from "./media-fetch.js";
 
 const MB = 1024 * 1024;
 
@@ -330,7 +331,11 @@ function collectReelVideo(media: MediaAsset[]): MediaAsset | null {
  * attached images. Video never reaches this: collectReelVideo routes it first.
  */
 function assertSinglePhotoOnly(media: MediaAsset[]): MediaAsset[] {
-  const images = media.filter((m) => (m.type === "image" || m.type === "gif") && m.url);
+  const images = media.filter((m) => m.type === "image" || m.type === "gif");
+  // Before the count cap: a URL-less asset is refused by name rather than
+  // filtered out, which published the post without it (or let a two-image
+  // render pass the single-photo cap with one image silently dropped).
+  for (const m of images) requireMediaUrl("facebook", m);
   if (images.length > MAX_IMAGES) {
     throw new PublishPreflightError(
       `facebook: this render carries ${images.length} images, but the direct Facebook transport only publishes a ` +

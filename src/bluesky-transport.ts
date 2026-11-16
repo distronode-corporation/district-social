@@ -34,7 +34,7 @@ import type {
 } from "./transport.js";
 import { threadReplies, type MediaAsset } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
-import { fetchMediaBytes } from "./media-fetch.js";
+import { fetchMediaBytes, requireMediaUrl } from "./media-fetch.js";
 
 /** Bluesky's own hard cap. Never both images and video in one post. */
 const MAX_IMAGES = 4;
@@ -126,8 +126,7 @@ async function uploadImages(media: MediaAsset[]): Promise<PostImage[]> {
   const images = media.filter((m) => m.type === "image" || m.type === "gif").slice(0, MAX_IMAGES);
   const out: PostImage[] = [];
   for (const asset of images) {
-    if (!asset.url) continue; // nothing fetchable; a library asset without a public URL cannot be uploaded here
-    const bytes = await fetchMediaBytes("bluesky", asset.url);
+    const bytes = await fetchMediaBytes("bluesky", requireMediaUrl("bluesky", asset));
     const blob = await uploadBlob(bytes, asset.mimeType);
     out.push({ blob, alt: asset.altText ?? "" });
   }

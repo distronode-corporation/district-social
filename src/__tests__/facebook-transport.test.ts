@@ -145,10 +145,15 @@ describe("facebook transport", () => {
       });
     });
 
-    it("skips a library asset with no public url and still posts text-only", async () => {
+    it("refuses a selected image with no public url instead of posting text-only", async () => {
       graphRequestMock.mockResolvedValue({ id: "page-1_556" });
-      await facebookTransport.publishNow(input({ media: [image({ url: undefined })] }));
-      expect(graphRequestMock).toHaveBeenCalledWith("page-1/feed", expect.any(Object));
+      await expect(
+        facebookTransport.publishNow(input({ media: [image({ path: "/lib/a.png", url: undefined })] })),
+      ).rejects.toMatchObject({
+        name: "PublishPreflightError",
+        message: expect.stringContaining("facebook: media asset /lib/a.png has no public url"),
+      });
+      expect(graphRequestMock).not.toHaveBeenCalled();
     });
   });
 
@@ -702,16 +707,12 @@ describe("facebook transport: non-Error failures and plain errors", () => {
     expect(status).toEqual({ connected: false, accountId: "", displayName: "", reason: "socket hang up" });
   });
 
-  it("drops an image with no public url from the photo count, so it does not trip the one-image cap", async () => {
+  it("refuses a URL-less image by name BEFORE the one-image cap, instead of dropping it to fit", async () => {
     graphRequestMock.mockResolvedValue({ id: "photo-1", post_id: "page-1_42" });
-    const result = await facebookTransport.publishNow(
-      input({ media: [image(), image({ path: "/tmp/b.png", url: undefined })] }),
-    );
-    expect(graphRequestMock).toHaveBeenCalledWith(
-      "page-1/photos",
-      expect.objectContaining({ method: "POST" }),
-    );
-    expect(result.ref).toBe("page-1_42:photo:photo-1");
+    await expect(
+      facebookTransport.publishNow(input({ media: [image(), image({ path: "/tmp/b.png", url: undefined })] })),
+    ).rejects.toThrow("facebook: media asset /tmp/b.png has no public url");
+    expect(graphRequestMock).not.toHaveBeenCalled();
   });
 
   it("warns with the stringified reason when the first comment rejects with a non-Error", async () => {

@@ -369,7 +369,7 @@ describe("pinterest transport: non-Error failures, url-less assets and media hos
     expect(createPinMock).not.toHaveBeenCalled();
   });
 
-  it("skips a library asset with no public url and pins the fetchable one", async () => {
+  it("refuses a selected asset with no public url instead of pinning without it", async () => {
     fetchMock().mockImplementation(async () => new Response(new Uint8Array([4])));
     createPinMock.mockResolvedValue({ id: "pin-2", link: undefined, title: "t", boardId: "board-1" });
 

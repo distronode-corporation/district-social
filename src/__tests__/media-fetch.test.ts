@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fetchMediaBytes, MEDIA_FETCH_MAX_BYTES, MEDIA_FETCH_TIMEOUT_MS } from "../media-fetch.js";
+import { isUnknownOutcome } from "../retry.js";
 
 /**
  * Unit cover for the shared media asset fetch. The five
@@ -67,5 +68,52 @@ describe("fetchMediaBytes", () => {
     expect(timeoutSpy).toHaveBeenLastCalledWith(120_000);
 
     timeoutSpy.mockRestore();
+  });
+
+  /**
+   * ⛔ A media fetch runs BEFORE the vendor create, so its failure is never an
+   * unknown outcome. Raw, a TimeoutError or fetch TypeError read as one to
+   * retry.ts, and the leg was marked "the post may already be live".
+   */
+  it("wraps a timed-out fetch as a plain platform error that is NOT an unknown outcome", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const timeout = new Error("The operation was aborted due to timeout");
+    timeout.name = "TimeoutError";
+    fetchMock.mockRejectedValue(timeout);
+
+    const err = await fetchMediaBytes("x", "https://cdn.example.com/clip.mp4", { timeoutMs: 120_000 }).catch(
+      (e: unknown) => e,
+    );
+    expect((err as Error).message).toBe(
+      "x: failed to fetch media asset (timed out after 120s): https://cdn.example.com/clip.mp4",
+    );
+    expect(isUnknownOutcome(err)).toBe(false);
+  });
+
+  it("wraps a network failure the same way, keeping its reason", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+
+    const err = await fetchMediaBytes("bluesky", "https://cdn.example.com/a.png").catch((e: unknown) => e);
+    expect((err as Error).message).toBe("bluesky: failed to fetch media asset (fetch failed): https://cdn.example.com/a.png");
+    expect(isUnknownOutcome(err)).toBe(false);
+  });
+
+  it("wraps a body that fails mid-stream, which the same timeout signal also aborts", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const timeout = new Error("The operation was aborted due to timeout");
+    timeout.name = "TimeoutError";
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(timeout);
+      },
+    });
+    fetchMock.mockImplementation(async () => new Response(body));
+
+    const err = await fetchMediaBytes("pinterest", "https://cdn.example.com/a.png").catch((e: unknown) => e);
+    expect((err as Error).message).toBe(
+      "pinterest: failed to fetch media asset (timed out after 20s): https://cdn.example.com/a.png",
+    );
+    expect(isUnknownOutcome(err)).toBe(false);
   });
 });

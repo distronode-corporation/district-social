@@ -37,7 +37,7 @@ import type {
 } from "./transport.js";
 import type { MediaAsset } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
-import { fetchMediaBytes } from "./media-fetch.js";
+import { fetchMediaBytes, requireMediaUrl } from "./media-fetch.js";
 
 /**
  * This client only implements the single-image `content.media` shape from the
@@ -105,9 +105,8 @@ function postUrl(ref: string): string {
   return `https://www.linkedin.com/feed/update/${ref}/`;
 }
 
-async function uploadImage(asset: MediaAsset): Promise<{ id: string; altText?: string } | undefined> {
-  if (!asset.url) return undefined; // nothing fetchable; a library asset without a public URL cannot be uploaded here
-  const bytes = await fetchMediaBytes("linkedin", asset.url);
+async function uploadImage(asset: MediaAsset): Promise<{ id: string; altText?: string }> {
+  const bytes = await fetchMediaBytes("linkedin", requireMediaUrl("linkedin", asset));
   const { uploadUrl, image } = await initializeImageUpload();
   await uploadImageBytes(uploadUrl, bytes, asset.mimeType);
   return { id: image, altText: asset.altText };

@@ -231,11 +231,16 @@ describe("linkedin transport", () => {
       expect(initializeImageUploadMock).toHaveBeenCalledTimes(1);
     });
 
-    it("skips a library asset with no public url rather than uploading nothing usable", async () => {
+    it("refuses a selected asset with no public url instead of posting text-only", async () => {
       createPostMock.mockResolvedValue({ ref: "urn:li:share:1" });
-      await linkedinTransport.publishNow(input({ media: [media({ url: undefined })] }));
+      await expect(
+        linkedinTransport.publishNow(input({ media: [media({ path: "/lib/a.png", url: undefined })] })),
+      ).rejects.toMatchObject({
+        name: "PublishPreflightError",
+        message: expect.stringContaining("linkedin: media asset /lib/a.png has no public url"),
+      });
       expect(initializeImageUploadMock).not.toHaveBeenCalled();
-      expect(createPostMock).toHaveBeenCalledWith({ commentary: "hello from Acme", media: undefined });
+      expect(createPostMock).not.toHaveBeenCalled();
     });
   });
 
