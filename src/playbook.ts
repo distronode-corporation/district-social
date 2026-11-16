@@ -57,8 +57,10 @@ export const PLAYBOOK_TUNING: Partial<Record<Platform, { followupDelayMinutes: n
  * The research settles the question: a body link costs ~60% reach
  * AND the first-comment workaround is penalized JUST AS HEAVILY, because the
  * algorithm now reads the comments immediately and treats an author's link comment
- * as bridge behaviour. So "first-comment" is strictly DOMINATED: it pays the same
- * penalty, adds a detection signal, and buries the link where fewer people look.
+ * as bridge behaviour. So a first-comment move is strictly DOMINATED: it pays the
+ * same penalty, adds a detection signal, and buries the link where fewer people
+ * look. It is not an option here at all, because the LinkedIn transport never
+ * sends a first comment (SENDS_FIRST_COMMENT): a link moved there never goes out.
  *
  * That leaves two real options, and neither is free:
  *   "body" - keep the link where readers see it and accept the ~60%.
@@ -68,14 +70,14 @@ export const PLAYBOOK_TUNING: Partial<Record<Platform, { followupDelayMinutes: n
  * on is not cheaper than a throttled one, it is just quieter. QA still reports the
  * penalty, so the cost is visible rather than hidden.
  *
- * Held on an object rather than a bare const so all three branches stay live code:
+ * Held on an object rather than a bare const so both branches stay live code:
  * a `const x: Union = "body"` narrows to `"body"`, and the compiler then reports the
- * other two as unreachable, which would quietly turn a documented choice into dead
+ * other as unreachable, which would quietly turn a documented choice into dead
  * code the next person deletes.
  */
-export type LinkPolicy = "body" | "first-comment" | "none";
+export type LinkPolicy = "body" | "none";
 
-// Exported so tests can exercise the two alternative policies; nothing else writes it.
+// Exported so tests can exercise the alternative policy; nothing else writes it.
 export const LINK_POLICIES: { linkedin: LinkPolicy } = { linkedin: "body" };
 
 export const LINKEDIN_LINK_POLICY: LinkPolicy = LINK_POLICIES.linkedin;
@@ -160,11 +162,7 @@ const PLAYBOOKS: Partial<Record<Platform, PlaybookFn>> = {
   linkedin: (r) => {
     const applied: string[] = [];
     if (!hasUrl(r.content)) return applied;
-    const policy = LINK_POLICIES.linkedin;
-    if (policy === "first-comment") {
-      const log = moveLinkToFirstComment(r);
-      if (log) applied.push(`${log} (penalized as heavily as a body link; not a workaround)`);
-    } else if (policy === "none") {
+    if (LINK_POLICIES.linkedin === "none") {
       const log = dropBodyLink(r);
       if (log) applied.push(`${log} (keeps full reach, gives up the click path)`);
     }
@@ -239,7 +237,12 @@ const PLAYBOOKS: Partial<Record<Platform, PlaybookFn>> = {
   reddit: (r, source) => {
     const applied: string[] = [];
     if (!r.title?.trim() && source.title?.trim()) {
-      r.title = source.title.trim();
+      // Clamped to Reddit's cap as Pinterest's derived title is: the post's
+      // own title was written for no platform in particular, and Reddit
+      // refuses a submission over it.
+      // Non-null: SPECS.reddit declares it (300).
+      const cap = SPECS.reddit.titleMaxChars!;
+      r.title = [...source.title.trim()].slice(0, cap).join("").trim();
       applied.push("carried the post title over (Reddit requires one)");
     }
     applied.push(...capHashtags(r, 0, "Reddit reads hashtags as spam"));

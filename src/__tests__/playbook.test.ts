@@ -242,6 +242,11 @@ describe("Reddit", () => {
     const { r } = run(render("reddit", { content: "body" }), source({ title: "Real title" }));
     expect(r.title).toBe("Real title");
   });
+
+  it("clamps a carried-over title to Reddit's 300 characters, which Reddit refuses past", () => {
+    const { r } = run(render("reddit", { content: "body" }), source({ title: "t".repeat(400) }));
+    expect([...r.title!]).toHaveLength(SPECS.reddit.titleMaxChars!);
+  });
 });
 
 describe("Bluesky", () => {
@@ -424,31 +429,14 @@ describe("PLAYBOOK_TUNING", () => {
 });
 
 /**
- * The two LinkedIn policies that are not the default. They are a documented
- * switch (see LINKEDIN_LINK_POLICY), so each has to do what its docblock says
- * the day someone flips it, including refusing to empty a link-only post.
+ * The LinkedIn policy that is not the default. It is a documented switch (see
+ * LINKEDIN_LINK_POLICY), so it has to do what its docblock says the day
+ * someone flips it, including refusing to empty a link-only post. There is no
+ * first-comment policy: the LinkedIn transport never sends one.
  */
-describe("LinkedIn alternative link policies", () => {
+describe("LinkedIn alternative link policy", () => {
   afterEach(() => {
     LINK_POLICIES.linkedin = "body";
-  });
-
-  it("first-comment moves the link out of the body and says it is still penalized", () => {
-    LINK_POLICIES.linkedin = "first-comment";
-    const { r, result } = run(render("linkedin", { content: `Full breakdown.\n${LINK}` }));
-    expect(r.content).toBe("Full breakdown.");
-    expect(r.firstComment).toBe(LINK);
-    expect(result.applied).toEqual([
-      "LinkedIn: moved the link out of the body into the first comment (penalized as heavily as a body link; not a workaround)",
-    ]);
-  });
-
-  it("first-comment leaves a link-only post alone rather than emptying it", () => {
-    LINK_POLICIES.linkedin = "first-comment";
-    const { r, result } = run(render("linkedin", { content: LINK }));
-    expect(r.content).toBe(LINK);
-    expect(r.firstComment).toBeUndefined();
-    expect(result.applied).toEqual([]);
   });
 
   it("none strips the link and says the click path is gone", () => {
