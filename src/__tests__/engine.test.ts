@@ -126,6 +126,20 @@ describe("createEngine", () => {
       expect(engine.profileUrl("tiktok")).toBe("");
     });
 
+    /**
+     * The engine derives its heading phrases and gate list from the pack when
+     * it is bound, so a pack edited in place afterwards would leave them
+     * stale. The fields are readonly: replacing the pack is the one way to
+     * change it, and the compiler refuses the edit.
+     */
+    it("exposes a pack whose fields cannot be reassigned, only replaced through setBrandPack", () => {
+      const engine = createEngine({ brand: { ...PACK } });
+      // @ts-expect-error BrandPack fields are readonly
+      engine.brand.brief = "## A heading edited in after binding";
+      // At runtime the stale derivation is exactly what the type prevents.
+      expect(engine.briefHeadingPhrases()).toEqual(["the internal heading for the shipped list"]);
+    });
+
     it("leaves every other engine alone: there is no shared registry", () => {
       const a = createEngine({ brand: PACK });
       const b = createEngine({ brand: PACK });

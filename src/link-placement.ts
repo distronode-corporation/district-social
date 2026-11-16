@@ -15,7 +15,12 @@
  */
 import { threadReplies, type PlatformRender } from "./types.js";
 
-export const URL_RE = /https?:\/\/[^\s<>"')]+/g;
+/**
+ * A URL in copy. A parenthesis is part of it only as a balanced pair
+ * ("wiki/Foo_(bar)"), so a URL wrapped in prose parentheses stops before the
+ * closing one; the old `[^...)]+` cut a Wikipedia-style link at its first `)`.
+ */
+export const URL_RE = /https?:\/\/(?:[^\s<>"'()]|\([^\s<>"'()]*\))+/g;
 const HASHTAG_RE = /(^|\s)(#[\p{L}\p{N}_]+)/gu;
 
 /** Collapse the whitespace/punctuation debris left by a removal. */

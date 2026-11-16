@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moveLinkToFirstComment, moveLinkToThread, extractLink, trimHashtags } from "../link-placement.js";
+import { moveLinkToFirstComment, moveLinkToThread, extractLink, trimHashtags, URL_RE } from "../link-placement.js";
 import type { PlatformRender } from "../types.js";
 
 function render(overrides: Partial<PlatformRender> = {}): PlatformRender {
@@ -179,5 +179,19 @@ describe("trimHashtags", () => {
   it("removes the overflow tags whether they open the text or follow whitespace", () => {
     expect(trimHashtags("#one body #two #three", 1)).toEqual({ text: "#one body", removed: 2 });
     expect(trimHashtags("#one #two", 0)).toEqual({ text: "", removed: 2 });
+  });
+});
+
+describe("URL_RE", () => {
+  it("keeps a balanced parenthesis inside a URL and leaves the wrapping ones outside", () => {
+    const text = "Background (see https://en.wikipedia.org/wiki/Foo_(bar)) and https://example.com/a.";
+    expect(text.match(URL_RE)).toEqual(["https://en.wikipedia.org/wiki/Foo_(bar)", "https://example.com/a."]);
+  });
+
+  it("moves the whole parenthesized URL, so the moved link is not cut at its first paren", () => {
+    const r = render({ platform: "facebook", content: "Read this.\nhttps://en.wikipedia.org/wiki/Foo_(bar)" });
+    moveLinkToFirstComment(r);
+    expect(r.content).toBe("Read this.");
+    expect(r.firstComment).toBe("https://en.wikipedia.org/wiki/Foo_(bar)");
   });
 });

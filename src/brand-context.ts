@@ -15,6 +15,12 @@
  * behaviour and nothing more. There is no module-level registry to set, so two
  * engines in one process (two tenants of a server) never share a brand.
  *
+ * ⚠️ One exception, by design: `SOCIALMETA_BRAND_OVERRIDE` (briefWithOverride)
+ * is read from the PROCESS environment, so when it is set it replaces the
+ * brief of every engine in the process, whichever brand each is bound to. It
+ * is a development knob for trying a brief without editing a pack; never set
+ * it on a server that holds more than one brand.
+ *
  * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
  */
 
@@ -48,33 +54,33 @@ export interface BrandProfile {
 
 export interface BrandPack {
   /** A short id for logs and tests. */
-  name: string;
+  readonly name: string;
   /**
    * The brief every model call reads: the formatter, the reviewer and the
    * reviser. Its copy rules (voice, content rules, the words it never says)
    * are prose in here; the parts a machine can hold are `qaGates`. Its `## `
    * headings are internal labels that QA refuses in public copy.
    */
-  brief: string;
+  readonly brief: string;
   /** Deterministic gates run after the engine's own compliance gates. */
-  qaGates?: readonly QaGate[];
-  profiles?: readonly BrandProfile[];
+  readonly qaGates?: readonly QaGate[];
+  readonly profiles?: readonly BrandProfile[];
   /**
    * The brand's name as the model prompts say it ("the social media editor
    * for <name>"). Absent: the prompts name no brand.
    */
-  displayName?: string;
+  readonly displayName?: string;
   /**
    * The registrable domains the brand's own tracked short links live on
    * (`<host>/l/<code>`), first one the example the reviewer is shown. Absent:
    * the reviewer is not told about tracked links and none are screened.
    */
-  linkDomains?: readonly string[];
+  readonly linkDomains?: readonly string[];
   /**
    * The brand's own wording for an engine compliance gate's message and fix,
    * by gate code. The gate's detection and severity stay the engine's.
    */
-  gateCopy?: Readonly<Record<string, GateCopy>>;
+  readonly gateCopy?: Readonly<Record<string, GateCopy>>;
 }
 
 /** A compliance gate's operator-facing text. */
@@ -137,7 +143,8 @@ export function briefHeadingPhrases(brief: string): string[] {
 /**
  * The brief for a prompt: the override when set and non-empty, else the
  * pack's own. The override replaces the words the model reads and nothing
- * else; the heading guard keeps reading the pack's brief.
+ * else; the heading guard keeps reading the pack's brief. Process-wide and
+ * dev-only (see this file's header): it applies to every engine at once.
  */
 export function briefWithOverride(brief: string): string {
   return process.env.SOCIALMETA_BRAND_OVERRIDE || brief;

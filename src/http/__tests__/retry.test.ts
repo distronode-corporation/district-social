@@ -83,6 +83,17 @@ describe("classification", () => {
    * ⚠️ The test above stays. Both shapes must classify the same way, and one of
    * them is what the code says while the other is what the clients do.
    */
+  /**
+   * 408 Request Timeout is the SERVER saying it gave up waiting, and a create
+   * may have landed before it did. Read as a plain 4xx decision, a publish
+   * that hit it was reported as refused and left retryable: a second post.
+   */
+  it("treats 408 as UNKNOWN, unlike every other 4xx", () => {
+    expect(isUnknownOutcome(new VendorError(408))).toBe(true);
+    expect(isRejection(new VendorError(408))).toBe(false);
+    expect(isUnknownOutcome(new VendorError(400))).toBe(false);
+  });
+
   it("treats a vendor error carrying status 0 as unknown, since 0 is not a status", () => {
     expect(isUnknownOutcome(new VendorError(0))).toBe(true);
     expect(isRejection(new VendorError(0))).toBe(false);

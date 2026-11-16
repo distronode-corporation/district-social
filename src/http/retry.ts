@@ -93,10 +93,12 @@ export function isRejection(err: unknown): boolean {
  *
  * Covers 5xx, plus the abort/timeout and network-level failures that never
  * reach a status at all — those are exactly the "we never heard back" case.
+ * And 408, the one 4xx that is not a decision: the server timed out waiting,
+ * and says nothing about whether the request was performed.
  */
 export function isUnknownOutcome(err: unknown): boolean {
   const status = statusOf(err);
-  if (status !== undefined && status >= 500) return true;
+  if (status !== undefined && (status >= 500 || status === 408)) return true;
 
   // ⛔ 0 IS NOT A STATUS. IT IS EVERY CLIENT'S SENTINEL FOR "NO HTTP RESPONSE
   // HAPPENED AT ALL", AND WITHOUT THIS LINE THE WHOLE FUNCTION IS DEAD BELOW.
