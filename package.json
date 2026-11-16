@@ -2,7 +2,7 @@
   "name": "district-social",
   "version": "0.0.0",
   "private": false,
-  "description": "District Social: Distronode's social publishing tool (pre-release scaffolding)",
+  "description": "District Social: an engine and CLI for drafting, checking and publishing social posts",
   "license": "Apache-2.0",
   "author": "Distronode Corporation",
   "homepage": "https://github.com/distronode-corporation/district-social#readme",

@@ -77,6 +77,7 @@ import {
   uploadBlob,
   getProfile,
   normalizeBlueskyIdentifier,
+  blueskyIdentifierHash,
 } from "../bluesky.js";
 
 const CREDS = { identifier: "example.com", password: "app-password" };
@@ -338,13 +339,15 @@ describe("bluesky login normalises the identifier", () => {
  * These assert the property that matters: with a stored session, no login.
  */
 describe("bluesky session persistence", () => {
-  const SESSION = {
+  const ATP_SESSION = {
     accessJwt: "access-1",
     refreshJwt: "refresh-1",
     handle: "example.com",
     did: "did:plc:test",
     active: true,
   };
+  /** As stored: tagged with the hash of the identifier it was created for. */
+  const SESSION = { ...ATP_SESSION, identifierHash: blueskyIdentifierHash(CREDS.identifier) };
 
   beforeEach(() => {
     mockLogin.mockReset().mockResolvedValue(undefined);
@@ -365,7 +368,8 @@ describe("bluesky session persistence", () => {
 
     await getProfile("did:plc:test");
 
-    expect(mockResumeSession).toHaveBeenCalledWith(SESSION);
+    // @atproto/api gets its own session data, never our hash.
+    expect(mockResumeSession).toHaveBeenCalledWith(ATP_SESSION);
     // The whole point. A login here would spend one of ten daily.
     expect(mockLogin).not.toHaveBeenCalled();
   });

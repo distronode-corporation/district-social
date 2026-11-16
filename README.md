@@ -1,8 +1,83 @@
 # district-social
-District Social: Distronode's social publishing tool (coming soon)
 
-**Status: pre-release scaffolding.** This repository holds the project's policies, CI and an
-empty package. There is no code to use yet, and nothing has been published to npm.
+District Social is an engine and a command-line client for drafting, checking and publishing
+social posts. The engine turns one source post into a render per network, runs QA over the
+renders (mechanical limits, compliance gates and an optional model review), applies fixes, and
+publishes through each network's own API once a person has approved exactly what will be sent.
+
+## Networks
+
+The engine covers 10 networks, each with a direct API transport:
+
+Instagram, Facebook, Threads, X (Twitter), LinkedIn, YouTube, Reddit, Bluesky, Pinterest and
+TikTok.
+
+The platform ids are `ALL_PLATFORMS` in `src/types.ts`, and the per-network limits and
+conventions are `SPECS` in `src/specs.ts`. A network publishes only when its transport is
+registered and its credentials resolve.
+
+## Install
+
+The package is not on npm yet. Install from source, with Node.js 24 or later:
+
+```
+git clone https://github.com/distronode-corporation/district-social.git
+cd district-social
+npm ci
+npm run build    # emits dist/, the package entry point
+```
+
+## Using the engine
+
+`createEngine` binds a brand pack (the brief every model call reads, plus optional QA gates)
+and the ports the application provides: a clock, a model, and optionally stores for drafts,
+credentials and media, a lock and an approval gate. The in-memory implementations in
+`src/ports.ts` run a single process with no infrastructure.
+
+```ts
+import { createEngine, type Draft, type GenJsonOptions, type LlmClient } from "district-social";
+
+// Any model that answers with JSON of the requested schema. Leave `llm` out to use Claude.
+const llm: LlmClient = {
+  generateJson: async <T>(prompt: string, opts: GenJsonOptions) => (await callYourModel(prompt, opts.schema)) as T,
+};
+
+const engine = createEngine({ brand: { name: "example", brief: "Plain, friendly voice. No hype." }, llm });
+
+const source = { text: "We shipped dark mode.", hashtags: [], media: [] };
+const renders = await engine.formatPost(source, ["bluesky", "linkedin"]);
+
+const now = new Date().toISOString();
+const draft: Draft = { id: "d1", createdAt: now, updatedAt: now, status: "draft", source, targets: ["bluesky", "linkedin"], renders };
+const report = await engine.runQa(draft);
+console.log(report.issues);
+```
+
+`callYourModel` stands for your own model call. The full public surface is `src/index.ts`.
+
+Publishing is approval-gated: the engine only consumes a single-use approval for a hash of the
+exact renders, and has no call that grants one. Grants come from the application's own human
+surface.
+
+## The CLI
+
+`scripts/social/` is a command-line client for an agent API built on this engine: draft, QA,
+check before approval, publish on approval, and read back what went out. See
+[scripts/social/README.md](scripts/social/README.md).
+
+## Bring your own credentials and model
+
+No credentials ship with this repository. Each self-hoster registers their own developer
+apps with each network, completes that network's review where it requires one, and supplies
+the tokens through the engine's credential resolvers or a `CredentialStore`. App approvals
+granted to anyone else, including the project's maintainers, do not transfer to your
+deployment.
+
+The model is yours too. The default `LlmClient` calls Claude with your own Anthropic
+credentials (an API key read through `setSecretGetter`, or workload identity federation); pass any other client with the same contract (the reply has the requested schema,
+and a refusal or truncated reply throws) as `llm`.
+
+## Project
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to run the local gate, and the rules for changes.
 - [SECURITY.md](SECURITY.md): how to report a vulnerability privately.

@@ -24,6 +24,7 @@ import type {
   BlobRef,
   ComAtprotoRepoStrongRef,
 } from "@atproto/api";
+import { createHash } from "node:crypto";
 import { getErrorMessage } from "./error-message.js";
 import type { RecentPostsPage } from "./recent-posts.js";
 // The engine's own capped reader (read-capped.ts), shared with media-fetch.ts.
@@ -220,11 +221,33 @@ export function setBlueskyCredentialsResolver(resolver: BlueskyCredentialsResolv
  * Injected, not imported: this folder is the portable engine and cannot reach
  * the app's database or encryption keys. A deployment that wires nothing
  * still works: it just logs in every cold start.
+ *
+ * ⛔ A store must keep the whole object it is given, `identifierHash`
+ * included (see StoredBlueskySession): a row that comes back without it is
+ * dropped and costs a login.
  */
 export type BlueskySessionStore = {
-  load: () => Promise<AtpSessionData | null>;
-  save: (session: AtpSessionData | null) => Promise<void>;
+  load: () => Promise<StoredBlueskySession | null>;
+  save: (session: StoredBlueskySession | null) => Promise<void>;
 };
+
+/**
+ * The session as stored: @atproto/api's session data plus the hash of the
+ * identifier it was created for (identifierHash). Optional so a row written
+ * before the field existed still loads; getAgent drops such a row and logs in
+ * once, and every save after that carries the hash.
+ */
+export type StoredBlueskySession = AtpSessionData & { identifierHash?: string };
+
+/**
+ * sha256 (hex) of the identifier as createSession takes it: normalised
+ * (normalizeBlueskyIdentifier) and lowercased. A hash rather than the
+ * identifier itself, so the stored row does not carry the operator's login
+ * email beside its tokens.
+ */
+export function blueskyIdentifierHash(identifier: string): string {
+  return createHash("sha256").update(normalizeBlueskyIdentifier(identifier).toLowerCase()).digest("hex");
+}
 
 let _sessionStore: BlueskySessionStore | null = null;
 
@@ -287,9 +310,14 @@ async function getAgent(): Promise<Agent> {
     // would send every process that saw the blip to createSession.
     // Never allowed to reject — a storage hiccup must not fail a publish that
     // is otherwise fine.
+    // Every live session saved carries the hash of the configured identifier,
+    // so a refresh (`update`, whose data @atproto/api rebuilds field by field)
+    // keeps it and the next cold start still resumes.
+    const identifierHash = blueskyIdentifierHash(creds.identifier);
     const session = new CredentialSession(new URL(SERVICE_URL), timeboxedFetch(), (evt, data) => {
       if (!_sessionStore || evt === "network-error") return;
-      const next = evt === "create" || evt === "update" ? (data ?? null) : null;
+      const live = evt === "create" || evt === "update" ? data : undefined;
+      const next: StoredBlueskySession | null = live ? { ...live, identifierHash } : null;
       // ⛔ `.then(() => save(...))`, NOT `Promise.resolve(save(...))`. The latter
       // CALLS save() before Promise.resolve exists to wrap it, so a store that
       // throws SYNCHRONOUSLY escapes the .catch below entirely and rejects
@@ -313,13 +341,15 @@ async function getAgent(): Promise<Agent> {
         })
       : null;
 
-    // ⛔ The store is one shared row, and nothing ties it to the credential.
-    // After the operator switches the Bluesky credential to another account,
-    // resuming the old row would publish as the OLD account. A session is
-    // resumed only when its handle, email or did is the configured identifier;
-    // otherwise it is dropped (same ordering rule as below) and we log in.
-    if (saved && !sessionBelongsTo(saved, creds.identifier)) {
-      console.warn("[bluesky] the stored session belongs to another account; dropping it and logging in");
+    // ⛔ The store is one shared row. After the operator switches the Bluesky
+    // credential to another account, resuming the old row would publish as
+    // the OLD account. So a session is resumed only when it carries the hash
+    // of the identifier configured now. A different hash, or none (a row from
+    // before the hash existed, which cannot show whose it is), is dropped
+    // (same ordering rule as below) and we log in: fail closed, at the cost of
+    // one login when the credential really changed or the row is old.
+    if (saved && saved.identifierHash !== identifierHash) {
+      console.warn("[bluesky] the stored session was not created for the configured identifier; dropping it and logging in");
       saved = null;
       await Promise.resolve()
         .then(() => _sessionStore?.save(null))
@@ -327,8 +357,10 @@ async function getAgent(): Promise<Agent> {
     }
 
     if (saved) {
+      // The hash is ours, not @atproto/api's session data.
+      const { identifierHash: _ours, ...atpSession } = saved;
       try {
-        await session.resumeSession(saved);
+        await session.resumeSession(atpSession);
       } catch (err) {
         // ⛔ ONLY A REFUSED REFRESH TOKEN ENDS THE STORED SESSION. Dropping the
         // shared row on any rejection would send several processes to
@@ -377,16 +409,6 @@ async function getAgent(): Promise<Agent> {
   } finally {
     _loginPromise = null;
   }
-}
-
-/**
- * Whether a stored session is the configured account's. The identifier is a
- * handle or an email (createSession's two forms) or a did; handles and emails
- * compare case-insensitively.
- */
-function sessionBelongsTo(saved: AtpSessionData, identifier: string): boolean {
-  const want = identifier.toLowerCase();
-  return [saved.handle, saved.email, saved.did].some((v) => v?.toLowerCase() === want);
 }
 
 export interface RichTextResult {

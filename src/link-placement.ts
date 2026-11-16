@@ -14,6 +14,7 @@
  * ESM cycle (format -> playbook -> revise -> qa -> format).
  */
 import { threadReplies, type PlatformRender } from "./types.js";
+import { trimTrailing } from "./trim.js";
 
 /**
  * A URL in copy. A parenthesis is part of it only as a balanced pair
@@ -143,7 +144,7 @@ export function extractLink(content: string): { body: string; linkText: string }
  * the same link.
  */
 function urlSet(text: string): Set<string> {
-  return new Set((text.match(URL_RE) ?? []).map((u) => u.replace(/[.,;:!?]+$/, "")));
+  return new Set((text.match(URL_RE) ?? []).map((u) => trimTrailing(u, ".,;:!?")));
 }
 
 /**
