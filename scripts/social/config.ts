@@ -7,8 +7,8 @@ import {
 } from "../../src/anthropic-wif.js";
 
 /**
- * This package's directory. Anchors config.json and the local-only drafts/ and
- * media-cache/ stores, so the CLI works from any cwd. Resolved from
+ * This package's directory. Anchors config.json, so the CLI works from any
+ * cwd. Resolved from
  * import.meta.url rather than process.cwd() because it is normally invoked
  * through a package script from another directory.
  */

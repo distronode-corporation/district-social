@@ -2,6 +2,4 @@
 # API origin and audience (config.ts reads it; config.example.json is the
 # tracked template to copy it from).
 config.json
-drafts/
-media-cache/
 *.log

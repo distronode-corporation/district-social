@@ -201,7 +201,6 @@ preflight.ts            `preflight` and its terminal view
 unschedule.ts           `unschedule`
 render.ts               terminal rendering of drafts and QA
 config.ts               config.json loading (the api block, defaults), wireEngineEnv()
-store.ts                a local draft store (drafts/, machine-local), for tools that run the engine in process
 config.example.json     template, copy to config.json
 platform-reference.md   researched platform facts and provenance
 ```
@@ -232,8 +231,7 @@ never notice because they bundle ESM. Keep it lazy.
 ## Running the engine in process: `wireEngineEnv` and Claude auth
 
 The CLI calls no model: the API's host does. A tool that runs the engine in
-process (for local drafts, with `store.ts`) reads `config.json` through
-`wireEngineEnv({ wireSecrets })`, which copies `vertex.project` and
+process reads `config.json` through `wireEngineEnv({ wireSecrets })`, which copies `vertex.project` and
 `defaults.subreddit` into the variables the engine reads (`VERTEX_PROJECT_ID`,
 `SOCIALMETA_DEFAULT_SUBREDDIT`) without overwriting any already set. There is
 no default Vertex project: set `VERTEX_PROJECT_ID` (or `vertex.project`) for
