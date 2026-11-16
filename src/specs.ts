@@ -2,6 +2,7 @@ import { NO_BRAND, fillBrandPlaceholders, type BrandContext } from "./brand-cont
 import { countUnit, measureLength } from "./length.js";
 import type { CountMode } from "./transport.js";
 import type { Platform } from "./types.js";
+import { trimLeading, trimTrailing } from "./trim.js";
 
 export interface PlatformSpec {
   platform: Platform;
@@ -688,11 +689,7 @@ export function specBlock(platforms: Platform[], brand: Pick<BrandContext, "bran
  */
 export function normalizeSubreddit(input: unknown): string | undefined {
   if (typeof input !== "string") return undefined;
-  const bare = input
-    .trim()
-    .replace(/^\/?r\//i, "")
-    .replace(/^\/+|\/+$/g, "")
-    .toLowerCase();
+  const bare = trimLeading(trimTrailing(input.trim().replace(/^\/?r\//i, ""), "/"), "/").toLowerCase();
   return bare || undefined;
 }
 

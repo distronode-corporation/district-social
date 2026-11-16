@@ -30,6 +30,7 @@
 
 import { genJson, type GenJsonOptions } from "./claude.js";
 import type { Draft } from "./types.js";
+import { trimTrailing } from "./trim.js";
 
 // ── Clock ────────────────────────────────────────────────────────────────────
 
@@ -225,7 +226,7 @@ export function inMemoryMediaStore(baseUrl = "memory://media"): MediaStore {
       checkKey(key);
       objects.set(key, { body: body.slice(), contentType });
       const path = key.split("/").map(encodeURIComponent).join("/");
-      return { key, contentType, bytes: body.byteLength, url: `${baseUrl.replace(/\/+$/, "")}/${path}` };
+      return { key, contentType, bytes: body.byteLength, url: `${trimTrailing(baseUrl, "/")}/${path}` };
     },
     async get(key) {
       const obj = objects.get(key);

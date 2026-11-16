@@ -40,6 +40,7 @@ import type {
 } from "./transport.js";
 import { threadReplies, type MediaAsset, type PlatformRender } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
+import { trimLineEnds } from "./trim.js";
 
 /** `children` on a CAROUSEL container: 2-20 items, VERIFIED against Meta's Threads API changelog — see channelRules(). */
 const MAX_CAROUSEL_ITEMS = 20;
@@ -283,8 +284,7 @@ export function liftTopicTag(content: string): { text: string; topicTag?: string
   // `(?=\s|$)` lookahead, so such a tag never matches and stays in the text.
   const tag = m[2];
   const start = m.index! + m[1].length;
-  const text = (content.slice(0, start) + content.slice(start + tag.length + 1))
-    .replace(/[ \t]+\n/g, "\n")
+  const text = trimLineEnds(content.slice(0, start) + content.slice(start + tag.length + 1))
     .replace(/[ \t]{2,}/g, " ")
     .trim();
   return { text, topicTag: tag };

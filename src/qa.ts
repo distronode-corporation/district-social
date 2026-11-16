@@ -27,6 +27,7 @@ import { defaults } from "./settings.js";
 import { SENDS_FIRST_COMMENT, SPECS, linkDestination, normalizeSubreddit, specBlock, vendorLength } from "./specs.js";
 import { effectiveMaxChars, type ChannelRulesSnapshot } from "./channel-rules.js";
 import { ALL_PLATFORMS, type Platform } from "./types.js";
+import { trimTrailing } from "./trim.js";
 import type { Draft, MediaAsset, PlatformRender, QAIssue, QAReport, QASeverity } from "./types.js";
 
 function countHashtags(text: string): number {
@@ -1478,8 +1479,7 @@ const URL_TOKEN_RE = /(?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s"'`<>()
 
 /** Scheme, `www.`, trailing slash and sentence punctuation off, lower case. */
 function normalizeUrl(url: string): string {
-  return url
-    .replace(/[.,;:!?]+$/, "")
+  return trimTrailing(url, ".,;:!?")
     .replace(/^https?:\/\//i, "")
     .replace(/^www\./i, "")
     .replace(/\/$/, "")
