@@ -35,6 +35,7 @@ import type {
 import { threadReplies, type MediaAsset } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
 import { fetchMediaBytes, requireMediaUrl } from "./media-fetch.js";
+import { measureLength } from "./length.js";
 
 /** Bluesky's own hard cap. Never both images and video in one post. */
 const MAX_IMAGES = 4;
@@ -154,6 +155,25 @@ function assertNoVideo(media: MediaAsset[]): void {
   }
 }
 
+/**
+ * `app.bsky.feed.post` caps `text` at 3000 UTF-8 BYTES as well as 300
+ * graphemes. QA counts graphemes, and 300 of them can run past 3000 bytes
+ * (a ZWJ family emoji is one grapheme and 18 or more bytes), so the PDS would
+ * refuse a post QA passed. Checked for the root and every reply before
+ * anything is sent, so a refused reply cannot strand a live root.
+ */
+const MAX_TEXT_BYTES = 3000;
+
+function assertTextBytes(text: string, label: string): void {
+  const bytes = measureLength(text, "utf8bytes");
+  if (bytes > MAX_TEXT_BYTES) {
+    throw new PublishPreflightError(
+      `bluesky: ${label} is ${bytes} UTF-8 bytes, over the post record's ${MAX_TEXT_BYTES}-byte cap ` +
+        "(Bluesky caps bytes as well as the 300 graphemes). Shorten it, or use fewer emoji.",
+    );
+  }
+}
+
 function toStrongRef(rec: Record<string, string>, label: string): StrongRef {
   if (!rec.uri || !rec.cid) {
     throw new Error(`bluesky: ${label} is missing uri/cid: ${JSON.stringify(rec)}`);
@@ -189,6 +209,8 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
   const { render, media } = input;
 
   assertNoVideo(media);
+  assertTextBytes(render.content, "the post");
+  threadReplies(render).forEach((text, i) => assertTextBytes(text, `reply ${i + 1}`));
   const images = await uploadImages(media);
   const rootRich = await buildRichText(render.content);
   // The render's language tags ride on the root and on every inline reply: a
@@ -235,6 +257,8 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
     text,
     dueAt: new Date(now + (i + 1) * delayMinutes * 60_000).toISOString(),
     parent: rootRecord,
+    // Persisted with the reply: publishReply has no render to read them from.
+    ...(langs ? { langs } : {}),
   }));
 
   return { ref: root.uri, url: postUrl(root.uri), threadRoot: rootRecord, queued };
@@ -247,8 +271,15 @@ async function publishReply(
 ): Promise<DirectPublishResult> {
   const rootRef = toStrongRef(root, "threadRoot");
   const parentRef = toStrongRef(reply.parent, "queued reply parent");
+  assertTextBytes(reply.text, `reply ${reply.position}`);
   const rich = await buildRichText(reply.text);
-  const posted = await blueskyCreateReply({ text: rich.text, facets: rich.facets, root: rootRef, parent: parentRef });
+  const posted = await blueskyCreateReply({
+    text: rich.text,
+    facets: rich.facets,
+    root: rootRef,
+    parent: parentRef,
+    langs: reply.langs,
+  });
   // selfRef is what lets the releaser hang the NEXT reply off this one. Without
   // it every deferred reply can only target the root, which Bluesky renders as
   // a fan of siblings rather than the thread the operator wrote.

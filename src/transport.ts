@@ -463,6 +463,12 @@ export interface DirectQueuedReply {
   dueAt: string;
   /** Vendor handles the reply needs to attach itself to the chain. */
   parent: Record<string, string>;
+  /**
+   * The render's language tags (Bluesky `langs`), persisted so a reply
+   * released later is tagged like the root it hangs from. Absent when the
+   * render carried none.
+   */
+  langs?: string[];
 }
 
 /**

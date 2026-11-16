@@ -422,9 +422,65 @@ describe("bluesky transport", () => {
       ]);
       vi.useRealTimers();
     });
+
+    it("persists the render's langs on every queued reply, so a deferred reply is tagged like the root", async () => {
+      const root = { uri: "at://did:plc:x/app.bsky.feed.post/root", cid: "cid-root" };
+      createPostMock.mockResolvedValue(root);
+      const result = await blueskyTransport.publishNow(
+        input({ render: render({ threadItems: ["a", "b"], followupDelayMinutes: 10, langs: ["fr", "en"] }) }),
+      );
+      expect(result.queued!.map((q) => q.langs)).toEqual([
+        ["fr", "en"],
+        ["fr", "en"],
+      ]);
+    });
+  });
+
+  describe("the 3000-byte text cap", () => {
+    // 150 family emoji: 150 graphemes, well inside 300, but 25 bytes each.
+    const heavy = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}".repeat(150);
+
+    it("refuses a root over 3000 UTF-8 bytes before anything is uploaded or posted", async () => {
+      await expect(
+        blueskyTransport.publishNow(input({ render: render({ content: heavy }), media: [media()] })),
+      ).rejects.toMatchObject({
+        name: "PublishPreflightError",
+        message: expect.stringMatching(/^bluesky: the post is 3750 UTF-8 bytes, over the post record's 3000-byte cap/),
+      });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(createPostMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses an over-cap REPLY before the root goes live", async () => {
+      await expect(
+        blueskyTransport.publishNow(input({ render: render({ threadItems: ["fine", heavy] }) })),
+      ).rejects.toThrow(/^bluesky: reply 2 is 3750 UTF-8 bytes/);
+      expect(createPostMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses an over-cap queued reply at release", async () => {
+      const root = { uri: "at://did:plc:x/app.bsky.feed.post/root", cid: "cid-root" };
+      const reply: DirectQueuedReply = { position: 3, text: heavy, dueAt: new Date().toISOString(), parent: root };
+      await expect(blueskyTransport.publishReply!(reply, root)).rejects.toThrow(/^bluesky: reply 3 is 3750 UTF-8 bytes/);
+      expect(createReplyMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("publishReply", () => {
+    it("tags a released reply with the langs persisted on it", async () => {
+      const root = { uri: "at://did:plc:x/app.bsky.feed.post/root", cid: "cid-root" };
+      createReplyMock.mockResolvedValue({ uri: "at://did:plc:x/app.bsky.feed.post/d1", cid: "cid-d1" });
+      const reply: DirectQueuedReply = {
+        position: 1,
+        text: "suivi",
+        dueAt: new Date().toISOString(),
+        parent: { uri: root.uri, cid: root.cid },
+        langs: ["fr"],
+      };
+      await blueskyTransport.publishReply!(reply, root);
+      expect(createReplyMock).toHaveBeenCalledWith(expect.objectContaining({ text: "suivi", langs: ["fr"] }));
+    });
+
     it("posts one queued reply against the given root and its own parent", async () => {
       const root = { uri: "at://did:plc:x/app.bsky.feed.post/root", cid: "cid-root" };
       const posted = { uri: "at://did:plc:x/app.bsky.feed.post/deferred1", cid: "cid-d1" };
