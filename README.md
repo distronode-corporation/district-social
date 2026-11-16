@@ -75,7 +75,7 @@ itself, so the application calls `consume` on it before it calls `publishDraft`.
 
 `scripts/social/` is a command-line client for an agent API built on this engine: draft, QA,
 check before approval, publish on approval, and read back what went out. It is not in the
-npm package; it runs from a clone. See [scripts/social/README.md](scripts/social/README.md).
+npm package; it runs from a clone. See [scripts/social/README.md](https://github.com/distronode-corporation/district-social/blob/main/scripts/social/README.md).
 
 ## Bring your own credentials and model
 
@@ -91,9 +91,9 @@ and a refusal or truncated reply throws) as `llm`.
 
 ## Project
 
-- [CONTRIBUTING.md](CONTRIBUTING.md): how to run the local gate, and the rules for changes.
-- [SECURITY.md](SECURITY.md): how to report a vulnerability privately.
-- [CHANGELOG.md](CHANGELOG.md): what changed, release by release.
+- [CONTRIBUTING.md](https://github.com/distronode-corporation/district-social/blob/main/CONTRIBUTING.md): how to run the local gate, and the rules for changes.
+- [SECURITY.md](https://github.com/distronode-corporation/district-social/blob/main/SECURITY.md): how to report a vulnerability privately.
+- [CHANGELOG.md](https://github.com/distronode-corporation/district-social/blob/main/CHANGELOG.md): what changed, release by release.
 
-Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 Distronode
-Corporation; see [NOTICE](NOTICE).
+Licensed under the [Apache License, Version 2.0](https://github.com/distronode-corporation/district-social/blob/main/LICENSE). Copyright 2026 Distronode
+Corporation; see [NOTICE](https://github.com/distronode-corporation/district-social/blob/main/NOTICE).
