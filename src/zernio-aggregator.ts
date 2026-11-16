@@ -28,6 +28,8 @@ import {
 import { youtubeDescription, youtubeSafeText } from "./youtube.js";
 import { isAiGeneratedAsset } from "./instagram-transport.js";
 import { getErrorMessage } from "./error-message.js";
+import { SENDS_FIRST_COMMENT } from "./specs.js";
+import { PublishPreflightError } from "./publish.js";
 
 /**
  * ⛔ PERMANENT. This string is written into `providerPostId` by
@@ -312,6 +314,38 @@ function mediaItems(input: DirectPublishInput) {
     }));
 }
 
+/**
+ * The body Zernio publishes.
+ *
+ * ⛔ ZERNIO HAS NO FIRST-COMMENT FIELD (no `firstComment` on its create payload
+ * or on any `ZernioPlatformData`), and the playbook moves Facebook's link and
+ * Instagram's hashtag overflow into `render.firstComment`, which the direct
+ * transports post as a comment. Sending `content` alone published the post
+ * without them, with a real native id, so nothing downstream noticed. On the
+ * platforms whose transports send a first comment (SENDS_FIRST_COMMENT), it is
+ * appended to the body instead, and refused before any create when the folded
+ * body passes Zernio's own cap (QA measured the two values separately).
+ */
+function bodyFor(platform: Platform, input: DirectPublishInput): string {
+  const { content, firstComment } = input.render;
+  // Zernio forwards the body as the YouTube description, which refuses < and >
+  // and caps at 5000 bytes, so it gets the same sanitize-then-cut as the
+  // direct upload. QA measures before the swap, so a body at the cap with
+  // brackets in it would otherwise go out over it.
+  if (platform === "youtube") return youtubeDescription(content);
+  if (!firstComment || !SENDS_FIRST_COMMENT.has(platform)) return content;
+  const body = `${content}\n\n${firstComment}`;
+  // Every folding platform counts utf16 in RULES.
+  const cap = zernioAggregator.channelRules(platform).maxLength;
+  if (body.length > cap) {
+    throw new PublishPreflightError(
+      `${platform} via Zernio: the first comment has to ride in the body (Zernio cannot post one), ` +
+        `and together they are ${body.length} characters, over Zernio's ${cap}. Shorten the body or the first comment.`,
+    );
+  }
+  return body;
+}
+
 /* -------------------------------------------------------------------------- */
 /*  The aggregator                                                             */
 /* -------------------------------------------------------------------------- */
@@ -409,6 +443,7 @@ export const zernioAggregator: Aggregator = {
   },
 
   async publishNow(platform: Platform, input: DirectPublishInput): Promise<DirectPublishResult> {
+    const content = bodyFor(platform, input);
     const account = await accountFor(platform);
     const media = mediaItems(input);
     const platformSpecificData = platformData(platform, input, media);
@@ -418,11 +453,7 @@ export const zernioAggregator: Aggregator = {
     // top-level media to the root is not documented, so it is not risked.
     const topLevelMedia = platformSpecificData.threadItems ? [] : media;
     const post = await createPost({
-      // Zernio forwards the body as the YouTube description, which refuses < and >
-      // and caps at 5000 bytes, so it gets the same sanitize-then-cut as the
-      // direct upload. QA measures before the swap, so a body at the cap with
-      // brackets in it would otherwise go out over it.
-      content: platform === "youtube" ? youtubeDescription(input.render.content) : input.render.content,
+      content,
       platforms: [
         {
           platform,

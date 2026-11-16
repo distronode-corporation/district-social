@@ -1478,3 +1478,77 @@ describe("platformSpecificData: X threads and platforms with no options", () => 
     expect(sentBody()).toEqual({});
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/*  First comment                                                              */
+/* -------------------------------------------------------------------------- */
+
+describe("first comment", () => {
+  /**
+   * ⛔ Zernio's create payload has no first-comment field, and the playbook
+   * moves Facebook's link (and Instagram's hashtag overflow) into
+   * `render.firstComment`. Sending `content` alone published the post without
+   * its link, with a real native id, so nothing downstream noticed.
+   */
+  const FIRST_COMMENT_ACCOUNTS = {
+    accounts: [
+      { _id: "acc_fb", platform: "facebook", username: "examplebrand", isActive: true },
+      { _id: "acc_ig", platform: "instagram", username: "examplebrand", isActive: true },
+      { _id: "acc_th", platform: "threads", username: "examplebrand", isActive: true },
+      { _id: "acc_li", platform: "linkedin", username: "examplebrand", isActive: true },
+    ],
+  };
+  function sentContent(): string {
+    const create = calls.find((c) => c.method === "POST")!;
+    return (create.body as { content: string }).content;
+  }
+
+  for (const platform of ["facebook", "instagram", "threads"] as const) {
+    it(`appends ${platform}'s first comment to the body, since Zernio cannot post one`, async () => {
+      mockAccountsAnd(FIRST_COMMENT_ACCOUNTS, () => PUBLISHED("zp_1", platform, "n1"));
+      await zernioAggregator.publishNow(
+        platform,
+        publishInput({
+          render: { platform, content: "We shipped.", firstComment: "https://example.com/x", mediaIndices: [] },
+          destination: {},
+        }),
+      );
+      expect(sentContent()).toBe("We shipped.\n\nhttps://example.com/x");
+    });
+  }
+
+  it("sends the body unchanged when there is no first comment", async () => {
+    mockAccountsAnd(FIRST_COMMENT_ACCOUNTS, () => PUBLISHED("zp_1", "facebook", "n1"));
+    await zernioAggregator.publishNow(
+      "facebook",
+      publishInput({ render: { platform: "facebook", content: "We shipped.", mediaIndices: [] }, destination: {} }),
+    );
+    expect(sentContent()).toBe("We shipped.");
+  });
+
+  it("does not fold a first comment into a platform that never publishes one", async () => {
+    mockAccountsAnd(FIRST_COMMENT_ACCOUNTS, () => PUBLISHED("zp_1", "linkedin", "n1"));
+    await zernioAggregator.publishNow(
+      "linkedin",
+      publishInput({
+        render: { platform: "linkedin", content: "We shipped.", firstComment: "never sent", mediaIndices: [] },
+        destination: {},
+      }),
+    );
+    expect(sentContent()).toBe("We shipped.");
+  });
+
+  it("refuses before any create when the folded body would pass Zernio's cap", async () => {
+    mockAccountsAnd(FIRST_COMMENT_ACCOUNTS, () => PUBLISHED("zp_1", "threads", "n1"));
+    await expect(
+      zernioAggregator.publishNow(
+        "threads",
+        publishInput({
+          render: { platform: "threads", content: "a".repeat(480), firstComment: "b".repeat(30), mediaIndices: [] },
+          destination: {},
+        }),
+      ),
+    ).rejects.toMatchObject({ name: "PublishPreflightError", message: expect.stringMatching(/first comment/) });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+});
