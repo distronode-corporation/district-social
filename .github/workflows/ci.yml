@@ -2,7 +2,7 @@ name: CI
 
 # The gate every change to main passes, and the gate release.yml runs again on a tagged
 # commit (it calls this file as a reusable workflow, so the two cannot drift):
-#   lint        eslint with typescript-eslint's type-checked strict rules.
+#   lint        eslint with typescript-eslint's recommended type-checked rules.
 #   typecheck   tsc --noEmit over the sources, the tests and the vitest config.
 #   test        vitest with coverage, whose thresholds in vitest.config.ts fail the job below
 #               100 percent per file.

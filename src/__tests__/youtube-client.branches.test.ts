@@ -233,7 +233,7 @@ describe("getVideoStats", () => {
     );
 
     await expect(getVideoStats(["v1"])).resolves.toEqual([
-      { id: "v1", views: 9007199254740993, likes: 42, comments: 7 },
+      { id: "v1", views: Number("9007199254740993"), likes: 42, comments: 7 },
     ]);
   });
 

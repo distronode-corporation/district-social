@@ -119,7 +119,7 @@ export function createApiClient(opts: ApiOptions): ApiClient {
       // One token per process: it lives an hour, and no command runs that long.
       token ??= idToken();
       const headers: Record<string, string> = { authorization: `Bearer ${await token}` };
-      let payload: BodyInit | undefined;
+      let payload: RequestInit["body"];
       if (body instanceof FormData) {
         payload = body;
       } else if (body !== undefined) {

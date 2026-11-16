@@ -14,7 +14,7 @@
 import type { CountMode } from "./transport.js";
 
 let segmenterInstance: Intl.Segmenter | null = null;
-let encoder: TextEncoder | null = null;
+let encoder: InstanceType<typeof TextEncoder> | null = null;
 
 function graphemes(text: string): Intl.Segments {
   segmenterInstance ??= new Intl.Segmenter("en", { granularity: "grapheme" });

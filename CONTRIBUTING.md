@@ -26,7 +26,7 @@ This is every job in `.github/workflows/ci.yml`. All of it must be green on a pu
 
 ```
 npm ci
-npm run lint        # eslint, typescript-eslint's strict type-checked rules
+npm run lint        # eslint, typescript-eslint's recommended type-checked rules
 npm run typecheck   # tsc --noEmit, strict, sources, tests and configs included
 npm run build       # tsc -p tsconfig.build.json, the dist/ that release.yml publishes
 npm test            # vitest run --coverage, thresholds at 100 percent

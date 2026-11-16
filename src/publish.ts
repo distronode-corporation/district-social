@@ -673,7 +673,7 @@ export class PublishPreflightError extends Error {
  * unrecoverable.
  */
 export class PublishNotSentError extends Error {
-  constructor(readonly cause: unknown) {
+  constructor(override readonly cause: unknown) {
     super(getErrorMessage(cause));
     this.name = "PublishNotSentError";
   }

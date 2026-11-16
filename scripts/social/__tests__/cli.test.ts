@@ -162,7 +162,7 @@ describe("new", () => {
   it("builds the body from the API's fields only, with flags, uploads and aliases resolved", async () => {
     const img = file("card.png", "png");
     const renders = file("renders.json", JSON.stringify({ li: { content: "LI", mediaIndices: [0] } }));
-    h.request.mockImplementation(async (method: string, p: string) =>
+    h.request.mockImplementation(async (_method: string, p: string) =>
       p === "/media" ? { asset: { id: "a-up" } } : view({ approvals: [] }),
     );
     await run(
