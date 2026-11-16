@@ -1,5 +1,5 @@
 import { NO_BRAND, fillBrandPlaceholders, type BrandContext } from "./brand-context.js";
-import { measureLength } from "./length.js";
+import { countUnit, measureLength } from "./length.js";
 import type { CountMode } from "./transport.js";
 import type { Platform } from "./types.js";
 
@@ -644,7 +644,7 @@ export function specBlock(platforms: Platform[], brand: Pick<BrandContext, "bran
       const s = SPECS[p];
       return [
         `### ${s.displayName} (platform id: "${p}")`,
-        `- Hard limit: ${s.maxChars} chars${s.truncationPoint ? `; feed truncates at ~${s.truncationPoint} chars ("see more")` : ""}`,
+        `- Hard limit: ${s.maxChars} ${countUnit(s.countMode)}${s.truncationPoint ? `; feed truncates at ~${s.truncationPoint} chars ("see more")` : ""}`,
         `- Hashtags: ideal ${s.idealHashtags[0]}-${s.idealHashtags[1]}, placement: ${s.hashtagPlacement}${s.maxHashtags ? `, hard cap ${s.maxHashtags}` : ""}`,
         `- Links clickable: ${s.linksClickable ? "yes" : "NO"}`,
         s.titleRequired ? `- Title REQUIRED (max ${s.titleMaxChars} chars)` : "",
@@ -653,7 +653,9 @@ export function specBlock(platforms: Platform[], brand: Pick<BrandContext, "bran
         // can go: a video index on a platform that cannot publish one is a QA
         // fail, not a quiet text-only post.
         s.publishesVideo ? "" : "- Cannot publish video: never select a video index",
-        s.supportsThreads ? `- Threads supported (${s.threadItemMaxChars} chars/item)` : "",
+        s.supportsThreads
+          ? `- Threads supported (${s.threadItemMaxChars} ${countUnit(s.countMode).split(" (")[0]}/item)`
+          : "",
         // From the transport, not from supportsFirstComment: LinkedIn and
         // YouTube declare a first comment that their transports never send.
         SENDS_FIRST_COMMENT.has(p)

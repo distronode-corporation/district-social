@@ -1,6 +1,8 @@
 import { connectedAccounts } from "./publish.js";
 import { routeTransportFor } from "./transport.js";
 import { ALL_PLATFORMS, type Platform } from "./types.js";
+import { countUnit } from "./length.js";
+import type { CountMode } from "./transport.js";
 
 /**
  * The vendor limits a platform will actually enforce, for the platforms that
@@ -25,8 +27,13 @@ import { ALL_PLATFORMS, type Platform } from "./types.js";
  */
 export interface ChannelRules {
   platform: Platform;
-  /** The vendor's hard character cap. Authoritative over SPECS[p].maxChars. */
+  /** The vendor's hard cap, in `countMode`'s unit. Authoritative over SPECS[p].maxChars. */
   maxLength?: number;
+  /**
+   * The unit `maxLength` is counted in. Optional because a stored snapshot can
+   * predate it; absent reads as plain characters.
+   */
+  countMode?: CountMode;
 }
 
 export type ChannelRulesMap = Partial<Record<Platform, ChannelRules>>;
@@ -67,6 +74,7 @@ export async function fetchChannelRules(
     channels[platform] = {
       platform,
       maxLength: limits.maxLength,
+      countMode: limits.countMode,
     };
   }
 
@@ -85,7 +93,9 @@ export function rulesBlock(snapshot: ChannelRulesSnapshot | null, platforms: Pla
     const r = snapshot.channels[p];
     if (!r) continue;
     const parts: string[] = [];
-    if (r.maxLength !== undefined) parts.push(`- HARD limit from the platform: ${r.maxLength} chars`);
+    if (r.maxLength !== undefined) {
+      parts.push(`- HARD limit from the platform: ${r.maxLength} ${countUnit(r.countMode ?? "utf16")}`);
+    }
     if (parts.length) lines.push(`### ${p}\n${parts.join("\n")}`);
   }
   if (!lines.length) return "";

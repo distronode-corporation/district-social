@@ -58,7 +58,7 @@ describe("fetchChannelRules when the route disappears after the sweep", () => {
     const { snapshot, failures } = await fetchChannelRules(() => new Date("2026-09-24T00:00:00.000Z"));
 
     expect(Object.keys(snapshot.channels)).toEqual(["twitter"]);
-    expect(snapshot.channels.twitter).toEqual({ platform: "twitter", maxLength: 4000 });
+    expect(snapshot.channels.twitter).toEqual({ platform: "twitter", maxLength: 4000, countMode: "utf16" });
     expect(failures).toEqual([]);
     expect(h.connectedAccounts).toHaveBeenCalledWith({ fresh: true });
   });

@@ -32,11 +32,26 @@ export function graphemeCount(text: string): number {
   return n;
 }
 
+/** Trailing sentence punctuation is not part of a link X wraps. */
+const X_LINK_TAIL = String.raw`[^\s.,;:!?'")\]]`;
+
 /**
- * A URL as X's t.co wrapping sees it: trailing sentence punctuation is not part
- * of the link, so it is charged as ordinary text after the flat 23.
+ * The TLDs a bare domain is recognized by. X's own list (twitter-text) is far
+ * longer, and it cannot be imported here (no runtime imports), so this covers
+ * the common ones; a name ending in anything else ("Node.js") stays text.
  */
-const X_URL_RE = /https?:\/\/\S*[^\s.,;:!?'")\]]/g;
+const X_BARE_TLDS =
+  "com|net|org|io|co|ai|app|dev|info|biz|me|tv|ly|gg|xyz|ca|us|uk|de|fr|eu|au|nz|jp|es|it|nl|se|no|ch|be|at|ie|br|mx|sg|hk";
+
+/**
+ * A URL as X's t.co wrapping sees it, scheme first (group 1), else a bare
+ * domain (group 2): not preceded by `@`, a word character, a dot or a slash,
+ * so an email, a handle and the inside of another name never match.
+ */
+const X_URL_RE = new RegExp(
+  String.raw`(https?:\/\/\S*${X_LINK_TAIL})|(?<![\w@.\/:-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:${X_BARE_TLDS})(?![\w-])(?:\/\S*${X_LINK_TAIL})?)`,
+  "gi",
+);
 const X_URL_WEIGHT = 23;
 
 /**
@@ -75,7 +90,8 @@ function xTextWeight(text: string): number {
 
 /**
  * X's weighted length (docs.x.com/fundamentals/counting-characters):
- * NFC-normalized, every URL a flat 23 whatever its real length,
+ * NFC-normalized, every URL a flat 23 whatever its real length, a bare domain
+ * max(its length, 23) (see X_BARE_TLDS for why not a flat 23),
  * Latin and common punctuation 1, CJK and other scripts 2, every emoji 2.
  *
  * Not `max(weighted, raw)`, which is an aggregator validator's rule and not
@@ -87,10 +103,29 @@ export function xWeightedLength(text: string): number {
   let n = 0;
   let last = 0;
   for (const m of normalized.matchAll(X_URL_RE)) {
-    n += xTextWeight(normalized.slice(last, m.index)) + X_URL_WEIGHT;
+    const weight = m[1] ? X_URL_WEIGHT : Math.max(m[0].length, X_URL_WEIGHT);
+    n += xTextWeight(normalized.slice(last, m.index)) + weight;
     last = m.index + m[0].length;
   }
   return n + xTextWeight(normalized.slice(last));
+}
+
+/**
+ * The unit a limit in `mode` is counted in, for a prompt or an operator. A
+ * bare "300 chars" for Bluesky's 300 graphemes, or X's weighted 280, tells the
+ * model to count something the platform does not.
+ */
+export function countUnit(mode: CountMode): string {
+  switch (mode) {
+    case "weighted":
+      return "weighted chars (X weighting: every link 23, emoji and CJK 2)";
+    case "utf8bytes":
+      return "UTF-8 bytes (accented letters 2, emoji 4)";
+    case "grapheme":
+      return "graphemes (each emoji counts 1)";
+    case "utf16":
+      return "chars";
+  }
 }
 
 /** The length of `text` in the unit `mode` names, as the vendor counts it. */

@@ -242,6 +242,16 @@ describe("specBlock", () => {
     expect(neither).not.toContain("Requires media");
   });
 
+  it("states each hard limit in the unit the platform counts it in", () => {
+    expect(specBlock(["twitter"])).toContain(
+      `Hard limit: ${SPECS.twitter.maxChars} weighted chars (X weighting: every link 23, emoji and CJK 2)`,
+    );
+    expect(specBlock(["bluesky"])).toContain(`Hard limit: ${SPECS.bluesky.maxChars} graphemes (each emoji counts 1)`);
+    expect(specBlock(["youtube"])).toContain(
+      `Hard limit: ${SPECS.youtube.maxChars} UTF-8 bytes (accented letters 2, emoji 4)`,
+    );
+  });
+
   it("tells the formatter which platforms cannot publish video, and only those", () => {
     expect(specBlock(["bluesky"])).toContain("Cannot publish video");
     expect(specBlock(["twitter"])).not.toContain("Cannot publish video");
@@ -250,7 +260,7 @@ describe("specBlock", () => {
 
   it("includes threads and firstComment lines only when supported", () => {
     const threads = specBlock(["twitter"]);
-    expect(threads).toContain("Threads supported (280 chars/item)");
+    expect(threads).toContain("Threads supported (280 weighted chars/item)");
     const noThreads = specBlock(["facebook"]);
     expect(noThreads).not.toContain("Threads supported");
 

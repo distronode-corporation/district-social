@@ -78,7 +78,7 @@ describe("fetchChannelRules", () => {
       () => new Date("2026-08-03T00:00:00.000Z"),
     );
     expect(Object.keys(snap.channels)).toEqual(["twitter"]);
-    expect(snap.channels.twitter).toMatchObject({ platform: "twitter", maxLength: 4000 });
+    expect(snap.channels.twitter).toEqual({ platform: "twitter", maxLength: 4000, countMode: "utf16" });
     // No per-channel network call left to fail.
     expect(failures).toEqual([]);
   });
@@ -127,6 +127,21 @@ describe("rulesBlock", () => {
     // A stored snapshot entry can predate maxLength (the field is optional on
     // the map); with nothing to state, the platform contributes no section.
     expect(rulesBlock(snapshot({ twitter: { platform: "twitter" } }), ["twitter"])).toBe("");
+  });
+
+  it("names the UNIT each limit is counted in, so 300 graphemes never reads as 300 characters", () => {
+    const snap = snapshot({
+      twitter: { platform: "twitter", maxLength: 280, countMode: "weighted" },
+      bluesky: { platform: "bluesky", maxLength: 300, countMode: "grapheme" },
+      youtube: { platform: "youtube", maxLength: 5000, countMode: "utf8bytes" },
+      // A stored snapshot can predate countMode: plain characters, as before.
+      reddit: { platform: "reddit", maxLength: 40000 },
+    });
+    const block = rulesBlock(snap, ["twitter", "bluesky", "youtube", "reddit"]);
+    expect(block).toContain("HARD limit from the platform: 280 weighted chars (X weighting: every link 23, emoji and CJK 2)");
+    expect(block).toContain("HARD limit from the platform: 300 graphemes (each emoji counts 1)");
+    expect(block).toContain("HARD limit from the platform: 5000 UTF-8 bytes (accented letters 2, emoji 4)");
+    expect(block).toContain("HARD limit from the platform: 40000 chars");
   });
 });
 

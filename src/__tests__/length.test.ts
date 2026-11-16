@@ -16,6 +16,25 @@ describe("xWeightedLength", () => {
     expect(xWeightedLength("a https://a.co b https://b.co c")).toBe(1 + 1 + 23 + 3 + 23 + 2);
   });
 
+  /**
+   * X also wraps a bare domain ("example.com") in t.co. Counted as plain text,
+   * a short one was charged under 23 and a post X refuses passed QA. Charged
+   * max(len, 23): whether X links a given name depends on its TLD list, which
+   * this file cannot import, so a long one is never undercharged either.
+   */
+  it("charges a bare domain max(its length, 23), path included", () => {
+    expect(xWeightedLength("see example.com today")).toBe(4 + 23 + 6);
+    expect(xWeightedLength("EXAMPLE.CO.UK/pricing.")).toBe(23 + 1);
+    const long = `${"a".repeat(40)}.com/x`;
+    expect(xWeightedLength(`go ${long}`)).toBe(3 + long.length);
+  });
+
+  it("does not take an email, a handle or a file name for a bare domain", () => {
+    expect(xWeightedLength("me@example.com")).toBe(14);
+    expect(xWeightedLength("Node.js and next.config.ts")).toBe(26);
+    expect(xWeightedLength("https://example.com/a")).toBe(23);
+  });
+
   it("leaves trailing sentence punctuation outside the link", () => {
     expect(xWeightedLength("see https://example.com/pricing.")).toBe(4 + 23 + 1);
     expect(xWeightedLength("(https://example.com)")).toBe(1 + 23 + 1);
