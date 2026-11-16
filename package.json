@@ -1,0 +1,52 @@
+{
+  "name": "district-social",
+  "version": "0.0.0",
+  "private": false,
+  "description": "District Social: Distronode's social publishing tool (pre-release scaffolding)",
+  "license": "Apache-2.0",
+  "author": "Distronode Corporation",
+  "homepage": "https://github.com/distronode-corporation/district-social#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/distronode-corporation/district-social.git"
+  },
+  "bugs": {
+    "url": "https://github.com/distronode-corporation/district-social/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage --passWithNoTests",
+    "check": "npm run lint && npm run typecheck && npm run build && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@vitest/coverage-v8": "5.1.0",
+    "eslint": "10.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  },
+  "overrides": {
+    "minimatch": "11.0.5"
+  }
+}

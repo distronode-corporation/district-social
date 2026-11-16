@@ -1,0 +1,49 @@
+name: Scorecard
+
+# OpenSSF Scorecard: a third-party read of this repository's supply-chain posture (pinned
+# actions, token permissions, branch protection, signed releases, and so on). Results go
+# to code scanning as SARIF and are published to the public Scorecard API.
+#
+# Not on pull requests: scorecard-action documents that trigger as experimental, and
+# publishing needs `id-token: write`, which means nothing on a pull request.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 6 * * 1' # weekly, Monday, so a check that decays with time still reports
+  workflow_dispatch:
+
+# Nothing at the top level; the job asks for what it needs.
+permissions: {}
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      # Check out the code and read the workflow runs.
+      contents: read
+      actions: read
+      # Upload the SARIF to code scanning.
+      security-events: write
+      # Sign the published result, so the public API can tell it came from this repo.
+      id-token: write
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: results.sarif
+          category: scorecard
