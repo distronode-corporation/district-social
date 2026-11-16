@@ -37,8 +37,6 @@ const h = vi.hoisted(() => ({
   fetchImpls: [] as Array<typeof globalThis.fetch>,
   persistHandlers: [] as PersistHandler[],
   agentDid: undefined as string | undefined,
-  /** What a resume leaves in `session` (the real one merges getSession's answer). */
-  resumedSession: undefined as Record<string, unknown> | undefined,
   login: vi.fn(),
   resumeSession: vi.fn(),
   detectFacets: vi.fn(),
@@ -78,7 +76,7 @@ vi.mock("@atproto/api", async (importOriginal) => {
     };
     resumeSession = async (...a: unknown[]) => {
       const r = await h.resumeSession(...a);
-      this.session = h.resumedSession ?? { accessJwt: "a", refreshJwt: "r", handle: "h", did: "d", active: true };
+      this.session = { accessJwt: "a", refreshJwt: "r", handle: "h", did: "d", active: true };
       return r;
     };
     get hasSession() {
@@ -136,9 +134,12 @@ import {
   deleteRecord,
   uploadBlob,
   getProfile,
+  blueskyIdentifierHash,
 } from "../bluesky.js";
 
 const CREDS = { identifier: "example.com", password: "app-password" };
+/** The hash a session created for CREDS is stored with. */
+const CREDS_HASH = blueskyIdentifierHash(CREDS.identifier);
 const PROFILE = { data: { did: "did:plc:testaccount000", handle: "example.com" } };
 
 /** Opens a real (mocked) session so the constructed CredentialSession can be inspected. */
@@ -156,7 +157,6 @@ beforeEach(() => {
   h.fetchImpls.length = 0;
   h.persistHandlers.length = 0;
   h.agentDid = "did:plc:testaccount000";
-  h.resumedSession = undefined;
   // ⚠️ mockReset, not clearAllMocks: several tests seed a *Once queue and
   // clearAllMocks would leave it for the next test to inherit.
   h.login.mockReset().mockResolvedValue(undefined);
@@ -547,6 +547,7 @@ describe("opening the session", () => {
         handle: "example.com",
         did: "did:plc:test",
         active: true,
+        identifierHash: CREDS_HASH,
       }),
       save: async () => {
         throw new Error("database down");
@@ -570,7 +571,10 @@ describe("persisting the session", () => {
     handle: "example.com",
     did: "did:plc:test",
     active: true,
+    identifierHash: CREDS_HASH,
   };
+  /** What @atproto/api hands persistSession: its own fields, no hash. */
+  const { identifierHash: _hash, ...ATP_DATA } = SESSION_DATA;
 
   it("saves the session on create and again on every token rotation", async () => {
     const save = vi.fn(async () => {});
@@ -578,10 +582,12 @@ describe("persisting the session", () => {
     await openSession();
     const persist = h.persistHandlers[0];
 
-    persist("create", SESSION_DATA);
-    persist("update", { ...SESSION_DATA, accessJwt: "access-3" });
+    persist("create", ATP_DATA);
+    persist("update", { ...ATP_DATA, accessJwt: "access-3" });
     await flushMicrotasks();
 
+    // ⛔ Both carry the hash: a refresh rebuilds the session field by field,
+    // and a row saved without it would be dropped on the next cold start.
     expect(save).toHaveBeenNthCalledWith(1, SESSION_DATA);
     expect(save).toHaveBeenNthCalledWith(2, { ...SESSION_DATA, accessJwt: "access-3" });
   });
@@ -1056,54 +1062,62 @@ describe("post langs", () => {
 });
 
 /**
- * ⛔ A STORED SESSION IS RESUMED ONLY FOR THE ACCOUNT IT BELONGS TO. The store
- * is one shared row, so after the operator switches the Bluesky credential to
- * another account, resuming the old row would publish as the OLD account.
+ * ⛔ A STORED SESSION IS RESUMED ONLY FOR THE IDENTIFIER IT WAS CREATED FOR.
+ * The store is one shared row, so after the operator switches the Bluesky
+ * credential to another account, resuming the old row would publish as the
+ * OLD account. Each saved session carries the hash of the identifier it was
+ * created with; anything else is dropped and the configured account logs in
+ * (fail closed). The session's handle, email and did are not consulted: the
+ * PDS can leave the email out, which made that check fail open.
  */
 describe("session ownership", () => {
-  const STORED = {
-    accessJwt: "a",
-    refreshJwt: "r",
-    handle: "Example.com",
-    did: "did:plc:test",
-    email: "ops@example.com",
-    active: true,
-  };
+  const ATP = { accessJwt: "a", refreshJwt: "r", handle: "example.com", did: "did:plc:test", active: true };
 
-  it.each([
-    ["its handle, case-insensitively", "example.com"],
-    ["its email, case-insensitively", "OPS@example.com"],
-    ["its did", "did:plc:test"],
-  ])("resumes a stored session whose account matches the identifier by %s", async (_label, identifier) => {
-    setBlueskyCredentialsResolver(async () => ({ identifier, password: "app-password" }));
-    setBlueskySessionStore({ load: async () => STORED, save: vi.fn(async () => {}) });
-    await openSession();
-    expect(h.resumeSession).toHaveBeenCalledTimes(1);
-    expect(h.login).not.toHaveBeenCalled();
+  it("hashes the identifier as createSession takes it: trimmed, no leading @, lowercased", () => {
+    expect(blueskyIdentifierHash(" @Example.COM ")).toBe(CREDS_HASH);
+    expect(CREDS_HASH).toMatch(/^[0-9a-f]{64}$/);
+    expect(blueskyIdentifierHash("other.example")).not.toBe(CREDS_HASH);
   });
 
-  it("drops a stored session for ANOTHER account and logs in as the configured one", async () => {
+  it("resumes a stored session whose hash matches, with no createSession", async () => {
+    const save = vi.fn(async () => {});
+    setBlueskySessionStore({ load: async () => ({ ...ATP, identifierHash: CREDS_HASH }), save });
+    await openSession();
+    expect(h.resumeSession).toHaveBeenCalledWith(ATP);
+    expect(h.login).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalledWith(null);
+  });
+
+  it.each([
+    ["a row from before the hash existed", undefined],
+    ["a hash for ANOTHER identifier", blueskyIdentifierHash("previous.bsky.social")],
+  ])("drops %s and logs in exactly once as the configured account", async (_label, identifierHash) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const save = vi.fn(async () => {});
-      setBlueskyCredentialsResolver(async () => ({ identifier: "newbrand.bsky.social", password: "app-password" }));
-      setBlueskySessionStore({ load: async () => STORED, save });
+      setBlueskySessionStore({ load: async () => ({ ...ATP, identifierHash }), save });
       await openSession();
       expect(h.resumeSession).not.toHaveBeenCalled();
       expect(save).toHaveBeenCalledWith(null);
-      expect(h.login).toHaveBeenCalledWith({ identifier: "newbrand.bsky.social", password: "app-password" });
-      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/stored session belongs to another account/));
+      expect(h.login).toHaveBeenCalledTimes(1);
+      expect(h.login).toHaveBeenCalledWith(CREDS);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/not created for the configured identifier/));
+
+      // The session the login creates is saved WITH the hash, so the next
+      // cold start resumes it instead of logging in again.
+      h.persistHandlers.at(-1)!("create", { ...ATP, accessJwt: "fresh" });
+      await flushMicrotasks();
+      expect(save).toHaveBeenLastCalledWith({ ...ATP, accessJwt: "fresh", identifierHash: CREDS_HASH });
     } finally {
       warn.mockRestore();
     }
   });
 
-  it("still logs in when the mismatched session cannot be cleared", async () => {
+  it("still logs in when the dropped session cannot be cleared", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      setBlueskyCredentialsResolver(async () => ({ identifier: "newbrand.bsky.social", password: "app-password" }));
       setBlueskySessionStore({
-        load: async () => ({ ...STORED, email: undefined }),
+        load: async () => ATP,
         save: (() => {
           throw new Error("sync store failure");
         }) as unknown as BlueskySessionStore["save"],
@@ -1114,84 +1128,5 @@ describe("session ownership", () => {
     } finally {
       warn.mockRestore();
     }
-  });
-
-  /**
-   * ⛔ A STORED SESSION WITH NO EMAIL IS NOT EVIDENCE OF ANOTHER ACCOUNT. The
-   * PDS can leave `email` out of a session (refreshSession historically, and a
-   * getSession that fails is swallowed by @atproto/api), so dropping every
-   * such row under an email identifier sent each cold start to createSession,
-   * which allows ten a day. It is resumed, and the email the resumed session
-   * reports decides.
-   */
-  describe("an email identifier and a stored session without an email", () => {
-    const NO_EMAIL = { ...STORED, email: undefined };
-    const resumedAs = (email: string | undefined) => ({ ...NO_EMAIL, accessJwt: "a2", email });
-
-    beforeEach(() => {
-      setBlueskyCredentialsResolver(async () => ({ identifier: "Ops@example.com", password: "app-password" }));
-    });
-
-    it("resumes, and keeps the session when the resumed one reports the configured email", async () => {
-      const save = vi.fn(async () => {});
-      h.resumedSession = resumedAs("ops@EXAMPLE.com");
-      setBlueskySessionStore({ load: async () => NO_EMAIL, save });
-      await openSession();
-      expect(h.resumeSession).toHaveBeenCalledTimes(1);
-      expect(h.login).not.toHaveBeenCalled();
-      expect(save).not.toHaveBeenCalledWith(null);
-    });
-
-    it("drops it and logs in as the configured account when the resumed one reports ANOTHER email", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      try {
-        const save = vi.fn(async () => {});
-        h.resumedSession = resumedAs("someone@else.example");
-        setBlueskySessionStore({ load: async () => NO_EMAIL, save });
-        await openSession();
-        expect(h.resumeSession).toHaveBeenCalledTimes(1);
-        expect(save).toHaveBeenCalledWith(null);
-        expect(h.login).toHaveBeenCalledWith({ identifier: "Ops@example.com", password: "app-password" });
-        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/resumed session belongs to another account/));
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    it("still logs in as the configured account when that stored session cannot be cleared", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      try {
-        h.resumedSession = resumedAs("someone@else.example");
-        setBlueskySessionStore({
-          load: async () => NO_EMAIL,
-          save: async () => {
-            throw new Error("database down");
-          },
-        });
-        await expect(openSession()).resolves.toBeUndefined();
-        expect(h.login).toHaveBeenCalledTimes(1);
-      } finally {
-        warn.mockRestore();
-      }
-    });
-
-    it("keeps the session, and does not log in, when the resumed one still reports no email", async () => {
-      const save = vi.fn(async () => {});
-      h.resumedSession = resumedAs(undefined);
-      setBlueskySessionStore({ load: async () => NO_EMAIL, save });
-      await openSession();
-      expect(h.resumeSession).toHaveBeenCalledTimes(1);
-      expect(h.login).not.toHaveBeenCalled();
-      expect(save).not.toHaveBeenCalledWith(null);
-    });
-
-    it("logs in without an email check when the resume itself is refused", async () => {
-      const save = vi.fn(async () => {});
-      h.resumeSession.mockRejectedValue(new XRPCError(401, "ExpiredToken", "expired"));
-      setBlueskySessionStore({ load: async () => NO_EMAIL, save });
-      await openSession();
-      expect(save).toHaveBeenCalledWith(null);
-      expect(h.login).toHaveBeenCalledTimes(1);
-    });
   });
 });

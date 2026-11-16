@@ -24,6 +24,7 @@ import type {
   BlobRef,
   ComAtprotoRepoStrongRef,
 } from "@atproto/api";
+import { createHash } from "node:crypto";
 import { getErrorMessage } from "./error-message.js";
 import type { RecentPostsPage } from "./recent-posts.js";
 // The engine's own capped reader (read-capped.ts), shared with media-fetch.ts.
@@ -220,11 +221,33 @@ export function setBlueskyCredentialsResolver(resolver: BlueskyCredentialsResolv
  * Injected, not imported: this folder is the portable engine and cannot reach
  * the app's database or encryption keys. A deployment that wires nothing
  * still works: it just logs in every cold start.
+ *
+ * ⛔ A store must keep the whole object it is given, `identifierHash`
+ * included (see StoredBlueskySession): a row that comes back without it is
+ * dropped and costs a login.
  */
 export type BlueskySessionStore = {
-  load: () => Promise<AtpSessionData | null>;
-  save: (session: AtpSessionData | null) => Promise<void>;
+  load: () => Promise<StoredBlueskySession | null>;
+  save: (session: StoredBlueskySession | null) => Promise<void>;
 };
+
+/**
+ * The session as stored: @atproto/api's session data plus the hash of the
+ * identifier it was created for (identifierHash). Optional so a row written
+ * before the field existed still loads; getAgent drops such a row and logs in
+ * once, and every save after that carries the hash.
+ */
+export type StoredBlueskySession = AtpSessionData & { identifierHash?: string };
+
+/**
+ * sha256 (hex) of the identifier as createSession takes it: normalised
+ * (normalizeBlueskyIdentifier) and lowercased. A hash rather than the
+ * identifier itself, so the stored row does not carry the operator's login
+ * email beside its tokens.
+ */
+export function blueskyIdentifierHash(identifier: string): string {
+  return createHash("sha256").update(normalizeBlueskyIdentifier(identifier).toLowerCase()).digest("hex");
+}
 
 let _sessionStore: BlueskySessionStore | null = null;
 
@@ -287,9 +310,14 @@ async function getAgent(): Promise<Agent> {
     // would send every process that saw the blip to createSession.
     // Never allowed to reject — a storage hiccup must not fail a publish that
     // is otherwise fine.
+    // Every live session saved carries the hash of the configured identifier,
+    // so a refresh (`update`, whose data @atproto/api rebuilds field by field)
+    // keeps it and the next cold start still resumes.
+    const identifierHash = blueskyIdentifierHash(creds.identifier);
     const session = new CredentialSession(new URL(SERVICE_URL), timeboxedFetch(), (evt, data) => {
       if (!_sessionStore || evt === "network-error") return;
-      const next = evt === "create" || evt === "update" ? (data ?? null) : null;
+      const live = evt === "create" || evt === "update" ? data : undefined;
+      const next: StoredBlueskySession | null = live ? { ...live, identifierHash } : null;
       // ⛔ `.then(() => save(...))`, NOT `Promise.resolve(save(...))`. The latter
       // CALLS save() before Promise.resolve exists to wrap it, so a store that
       // throws SYNCHRONOUSLY escapes the .catch below entirely and rejects
@@ -313,27 +341,26 @@ async function getAgent(): Promise<Agent> {
         })
       : null;
 
-    // ⛔ The store is one shared row, and nothing ties it to the credential.
-    // After the operator switches the Bluesky credential to another account,
-    // resuming the old row would publish as the OLD account. A session is
-    // resumed only when its handle, email or did is the configured identifier;
-    // otherwise it is dropped (same ordering rule as below) and we log in.
-    // An email identifier against a stored session with NO email is unproven,
-    // not another account: it is resumed and checked below.
-    const owner = saved ? sessionOwner(saved, creds.identifier) : "mine";
-    if (saved && owner === "other") {
-      console.warn("[bluesky] the stored session belongs to another account; dropping it and logging in");
+    // ⛔ The store is one shared row. After the operator switches the Bluesky
+    // credential to another account, resuming the old row would publish as
+    // the OLD account. So a session is resumed only when it carries the hash
+    // of the identifier configured now. A different hash, or none (a row from
+    // before the hash existed, which cannot show whose it is), is dropped
+    // (same ordering rule as below) and we log in: fail closed, at the cost of
+    // one login when the credential really changed or the row is old.
+    if (saved && saved.identifierHash !== identifierHash) {
+      console.warn("[bluesky] the stored session was not created for the configured identifier; dropping it and logging in");
       saved = null;
       await Promise.resolve()
         .then(() => _sessionStore?.save(null))
         .catch(() => {});
     }
 
-    let resumed = false;
     if (saved) {
+      // The hash is ours, not @atproto/api's session data.
+      const { identifierHash: _ours, ...atpSession } = saved;
       try {
-        await session.resumeSession(saved);
-        resumed = true;
+        await session.resumeSession(atpSession);
       } catch (err) {
         // ⛔ ONLY A REFUSED REFRESH TOKEN ENDS THE STORED SESSION. Dropping the
         // shared row on any rejection would send several processes to
@@ -364,27 +391,7 @@ async function getAgent(): Promise<Agent> {
       }
     }
 
-    // The unproven case, settled by the session the resume left. @atproto/api's
-    // refresh fills `email` from getSession when refreshSession omits it, so a
-    // reported email that differs is another account: drop the row (same
-    // ordering rule as above) and log in. ⚠️ Still no email (an app-password
-    // session, or a getSession the library swallowed) proves nothing either
-    // way, and dropping it would spend one of ten daily createSession calls on
-    // every cold start, so the session is KEPT: the identifier we were given
-    // cannot show it is someone else's.
-    let otherAccount = false;
-    if (resumed && owner === "unproven") {
-      const reported = session.session?.email;
-      if (reported && reported.toLowerCase() !== creds.identifier.toLowerCase()) {
-        console.warn("[bluesky] the resumed session belongs to another account; dropping it and logging in");
-        otherAccount = true;
-        await Promise.resolve()
-          .then(() => _sessionStore?.save(null))
-          .catch(() => {});
-      }
-    }
-
-    if (otherAccount || !session.hasSession) {
+    if (!session.hasSession) {
       try {
         await session.login({ identifier: creds.identifier, password: creds.password });
       } catch (err) {
@@ -402,21 +409,6 @@ async function getAgent(): Promise<Agent> {
   } finally {
     _loginPromise = null;
   }
-}
-
-/**
- * Whose a stored session is, as far as it shows. The identifier is a handle or
- * an email (createSession's two forms) or a did; all compare
- * case-insensitively. A handle or did match is the configured account's. An
- * email identifier can only be compared with an email the session carries, so
- * a session with none is `unproven` (getAgent resumes it and checks the email
- * the resumed session reports); anything else that does not match is `other`.
- */
-function sessionOwner(saved: AtpSessionData, identifier: string): "mine" | "other" | "unproven" {
-  const want = identifier.toLowerCase();
-  if ([saved.handle, saved.did].some((v) => v?.toLowerCase() === want)) return "mine";
-  if (!saved.email) return want.includes("@") ? "unproven" : "other";
-  return saved.email.toLowerCase() === want ? "mine" : "other";
 }
 
 export interface RichTextResult {
