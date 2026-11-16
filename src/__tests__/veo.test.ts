@@ -223,6 +223,20 @@ describe("pollVideoOperation", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  /**
+   * ⛔ The location segment is interpolated into the HOST (veoHost), so a
+   * stored operation name carrying `locations/x@evil.example` would send the
+   * ADC bearer token to `x@evil.example-aiplatform.googleapis.com`.
+   * OPERATION_NAME_RE's narrow location class is the guard; this pins it.
+   */
+  it("refuses a location that would redirect the host, before any token is fetched or sent", async () => {
+    const hostile = "projects/p/locations/x@evil.example/publishers/google/models/m/operations/op-1";
+    await expect(pollVideoOperation(hostile)).rejects.toBeInstanceOf(VeoError);
+    await expect(pollVideoOperation(hostile)).rejects.toThrow(/does not match the expected shape/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockGetAccessToken).not.toHaveBeenCalled();
+  });
+
   describe("still running", () => {
     it("reports running when done is false", async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ name: RUNNING_OPERATION, done: false }));
