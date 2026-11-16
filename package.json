@@ -1,6 +1,6 @@
 {
   "name": "district-social",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "District Social: an engine and CLI for drafting, checking and publishing social posts",
   "license": "Apache-2.0",
