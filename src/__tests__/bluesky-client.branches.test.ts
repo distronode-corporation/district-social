@@ -1051,3 +1051,65 @@ describe("post langs", () => {
     expect(h.post).toHaveBeenCalledWith(expect.objectContaining({ langs: ["fr-CA", "en", "fr"] }));
   });
 });
+
+/**
+ * ⛔ A STORED SESSION IS RESUMED ONLY FOR THE ACCOUNT IT BELONGS TO. The store
+ * is one shared row, so after the operator switches the Bluesky credential to
+ * another account, resuming the old row would publish as the OLD account.
+ */
+describe("session ownership", () => {
+  const STORED = {
+    accessJwt: "a",
+    refreshJwt: "r",
+    handle: "Example.com",
+    did: "did:plc:test",
+    email: "ops@example.com",
+    active: true,
+  };
+
+  it.each([
+    ["its handle, case-insensitively", "example.com"],
+    ["its email, case-insensitively", "OPS@example.com"],
+    ["its did", "did:plc:test"],
+  ])("resumes a stored session whose account matches the identifier by %s", async (_label, identifier) => {
+    setBlueskyCredentialsResolver(async () => ({ identifier, password: "app-password" }));
+    setBlueskySessionStore({ load: async () => STORED, save: vi.fn(async () => {}) });
+    await openSession();
+    expect(h.resumeSession).toHaveBeenCalledTimes(1);
+    expect(h.login).not.toHaveBeenCalled();
+  });
+
+  it("drops a stored session for ANOTHER account and logs in as the configured one", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const save = vi.fn(async () => {});
+      setBlueskyCredentialsResolver(async () => ({ identifier: "newbrand.bsky.social", password: "app-password" }));
+      setBlueskySessionStore({ load: async () => STORED, save });
+      await openSession();
+      expect(h.resumeSession).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledWith(null);
+      expect(h.login).toHaveBeenCalledWith({ identifier: "newbrand.bsky.social", password: "app-password" });
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/stored session belongs to another account/));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("still logs in when the mismatched session cannot be cleared", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      setBlueskyCredentialsResolver(async () => ({ identifier: "newbrand.bsky.social", password: "app-password" }));
+      setBlueskySessionStore({
+        load: async () => ({ ...STORED, email: undefined }),
+        save: (() => {
+          throw new Error("sync store failure");
+        }) as unknown as BlueskySessionStore["save"],
+      });
+      await expect(openSession()).resolves.toBeUndefined();
+      expect(h.resumeSession).not.toHaveBeenCalled();
+      expect(h.login).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

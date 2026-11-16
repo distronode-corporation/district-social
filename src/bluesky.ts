@@ -306,12 +306,25 @@ async function getAgent(): Promise<Agent> {
     // ── Resume before logging in ────────────────────────────────────────────
     // The whole point of the store: a resume spends a refreshSession, a login
     // spends one of only TEN createSession calls per day.
-    const saved = _sessionStore
+    let saved = _sessionStore
       ? await _sessionStore.load().catch((err) => {
           console.warn("[bluesky] could not read stored session:", err);
           return null;
         })
       : null;
+
+    // ⛔ The store is one shared row, and nothing ties it to the credential.
+    // After the operator switches the Bluesky credential to another account,
+    // resuming the old row would publish as the OLD account. A session is
+    // resumed only when its handle, email or did is the configured identifier;
+    // otherwise it is dropped (same ordering rule as below) and we log in.
+    if (saved && !sessionBelongsTo(saved, creds.identifier)) {
+      console.warn("[bluesky] the stored session belongs to another account; dropping it and logging in");
+      saved = null;
+      await Promise.resolve()
+        .then(() => _sessionStore?.save(null))
+        .catch(() => {});
+    }
 
     if (saved) {
       try {
@@ -364,6 +377,16 @@ async function getAgent(): Promise<Agent> {
   } finally {
     _loginPromise = null;
   }
+}
+
+/**
+ * Whether a stored session is the configured account's. The identifier is a
+ * handle or an email (createSession's two forms) or a did; handles and emails
+ * compare case-insensitively.
+ */
+function sessionBelongsTo(saved: AtpSessionData, identifier: string): boolean {
+  const want = identifier.toLowerCase();
+  return [saved.handle, saved.email, saved.did].some((v) => v?.toLowerCase() === want);
 }
 
 export interface RichTextResult {
