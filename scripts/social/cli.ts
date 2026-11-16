@@ -7,7 +7,13 @@ import { createApiClient, type ApiClient } from "./api.js";
 import { readApiConfig } from "./config.js";
 import { registerPreflight } from "./preflight.js";
 import { registerUnschedule } from "./unschedule.js";
-import { ALL_PLATFORMS, type Draft, type Platform, type QAReport } from "../../src/index.js";
+import {
+  ALL_PLATFORMS,
+  type ChannelRulesSnapshot,
+  type Draft,
+  type Platform,
+  type QAReport,
+} from "../../src/index.js";
 
 /**
  * The Social HQ CLI: a client of a Social HQ agent API (/api/internal/social/*).
@@ -75,7 +81,9 @@ const CANONICAL = new Set<string>(ALL_PLATFORMS);
 
 function platformOf(raw: string): Platform {
   const key = raw.trim().toLowerCase();
-  const p = CANONICAL.has(key) ? (key as Platform) : ALIAS[key];
+  // Own keys only: a bare ALIAS[key] answers "constructor" or "toString" with
+  // Object.prototype's functions, which would go out as a target.
+  const p = CANONICAL.has(key) ? (key as Platform) : Object.hasOwn(ALIAS, key) ? ALIAS[key] : undefined;
   if (!p) throw new Error(`unknown platform "${raw}" (use: ${ALL_PLATFORMS.join(", ")}, or "all")`);
   return p;
 }
@@ -107,16 +115,47 @@ const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
 };
 
-/** Upload one file to the asset store; its asset id. */
-async function upload(client: ApiClient, file: string, alt: string | undefined): Promise<string> {
+/** The upload type of a file, or a refusal naming the types this CLI uploads. */
+function mimeOf(file: string): string {
   const type = MIME[path.extname(file).toLowerCase()];
   if (!type) throw new Error(`${file}: not an image, video or PDF this CLI uploads (${Object.keys(MIME).join(" ")})`);
+  return type;
+}
+
+/** Upload one file to the asset store; its asset id. */
+async function upload(client: ApiClient, file: string, alt: string | undefined): Promise<string> {
+  const type = mimeOf(file);
   const form = new FormData();
   form.set("file", new Blob([fs.readFileSync(file)], { type }), path.basename(file));
   if (alt) form.set("altText", alt);
   const { asset } = await client.request<{ asset: { id: string } }>("POST", "/media", form);
   console.error(`uploaded ${file} -> asset ${asset.id}`);
   return asset.id;
+}
+
+/** A spec field that must be a list of strings, or absent. */
+function stringList(field: string, value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
+    throw new Error(`${field}: expected a list of strings`);
+  }
+  return value;
+}
+
+/** The spec's `media`: a list of `{ file, alt? }`, or absent. */
+function specMedia(value: unknown): Array<{ file: string; alt?: string }> {
+  if (value === undefined) return [];
+  const ok =
+    Array.isArray(value) &&
+    value.every(
+      (m: unknown) =>
+        !!m &&
+        typeof m === "object" &&
+        typeof (m as { file?: unknown }).file === "string" &&
+        ["undefined", "string"].includes(typeof (m as { alt?: unknown }).alt),
+    );
+  if (!ok) throw new Error("media: expected a list of { file, alt? } with string values");
+  return value as Array<{ file: string; alt?: string }>;
 }
 
 function readJson(file: string): Record<string, unknown> {
@@ -150,10 +189,16 @@ interface DraftView {
   legs: Array<{ platform: string | null; state: string; ref: string | null; url: string | null }>;
   /** Newest first; an `approved` one is unspent, and its id is what `publish` cites. */
   approvals?: ApprovalRow[];
+  /** The live vendor rules the formatter trimmed to, when the API sends them. */
+  rules?: ChannelRulesSnapshot | null;
 }
 
 function printView(view: DraftView): void {
-  console.log(renderDraft(view.draft));
+  const rules = view.rules ?? null;
+  console.log(renderDraft(view.draft, rules));
+  // Without a snapshot the counters show the engine's spec caps, which can
+  // differ from the account's real ones (X Premium), so say which they are.
+  if (!rules) console.log("  (length caps: the engine's spec fallback; the API sent no live rules snapshot)");
   for (const leg of view.legs) {
     console.log(`  leg ${leg.platform ?? "?"}: ${leg.state}${leg.ref ? ` ${leg.ref}` : ""}${leg.url ? ` ${leg.url}` : ""}`);
   }
@@ -245,32 +290,41 @@ export function createProgram(deps: CliDeps = {}): Command {
         throw new Error(`${o.spec}: unknown fields: ${unknown.join(", ")} (valid: ${[...SPEC_FIELDS].join(", ")})`);
       }
       const specDir = o.spec ? path.dirname(path.resolve(o.spec)) : process.cwd();
-      const client = api();
+
+      // ⛔ Everything is validated BEFORE the first upload: a refusal after one
+      // would leave orphaned assets on Social HQ for a draft that never existed.
+      const text: unknown = o.text ?? spec.text;
+      if (typeof text !== "string" || !text.trim()) throw new Error("new needs --text (or a spec with text)");
+      const targets = o.platforms ? parsePlatforms(o.platforms) : stringList("targets", spec.targets)?.map(platformOf);
+      const renders = canonicalRenders(o.renders ? readJson(o.renders) : spec.renders);
+      const specAssetIds = stringList("assetIds", spec.assetIds) ?? [];
+      const files: Array<{ file: string; alt?: string }> = [
+        ...specMedia(spec.media).map((m) => ({ file: path.resolve(specDir, m.file), alt: m.alt })),
+        ...((o.media ?? []) as string[]).map((file) => ({ file })),
+      ];
+      for (const f of files) mimeOf(f.file);
 
       // Media order is the draft's: the spec's files, then -m files, then
       // existing ids. Hand-written mediaIndices index this list.
+      const client = api();
       const assetIds: string[] = [];
-      for (const m of (spec.media ?? []) as Array<{ file: string; alt?: string }>) {
-        assetIds.push(await upload(client, path.resolve(specDir, m.file), m.alt));
-      }
-      for (const file of (o.media ?? []) as string[]) assetIds.push(await upload(client, file, undefined));
-      assetIds.push(...((spec.assetIds ?? []) as string[]), ...((o.asset ?? []) as string[]));
+      for (const f of files) assetIds.push(await upload(client, f.file, f.alt));
+      assetIds.push(...specAssetIds, ...((o.asset ?? []) as string[]));
 
       // Built from the API's own field list, never a spread of the spec: the API
       // refuses an unknown field, and the CLI refuses it first (above).
       const body: Record<string, unknown> = {
-        text: o.text ?? spec.text,
+        text,
         title: o.title ?? spec.title,
         link: o.link ?? spec.link,
         notes: o.notes ?? spec.notes,
         hashtags: parseHashtags(o.hashtags) ?? spec.hashtags,
-        targets: o.platforms ? parsePlatforms(o.platforms) : (spec.targets as string[] | undefined)?.map(platformOf),
+        targets,
         subreddit: o.subreddit ?? spec.subreddit,
         pinterestBoard: o.board ?? spec.pinterestBoard,
         assetIds,
-        renders: canonicalRenders(o.renders ? readJson(o.renders) : spec.renders),
+        renders,
       };
-      if (typeof body.text !== "string" || !body.text.trim()) throw new Error("new needs --text (or a spec with text)");
 
       console.error("formatting and checking on Social HQ…");
       const view = await client.request<DraftView>("POST", "/drafts", body);
@@ -308,7 +362,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .description("Show a draft: per-platform renders, QA, legs, rendersHash, and its approvals (ids `publish` cites)")
     .option("--json", "print the API's answer as JSON")
     .action(async (id, o) => {
-      const view = await api().request<DraftView>("GET", `/drafts/${id}`);
+      const view = await api().request<DraftView>("GET", `/drafts/${encodeURIComponent(id)}`);
       if (o.json) return json(view);
       printView(view);
     });
@@ -318,7 +372,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .description("Re-run the full QA on Social HQ and store it")
     .option("--json", "print the API's answer as JSON")
     .action(async (id, o) => {
-      const { qa } = await api().request<{ qa: QAReport }>("POST", `/drafts/${id}/qa`);
+      const { qa } = await api().request<{ qa: QAReport }>("POST", `/drafts/${encodeURIComponent(id)}/qa`);
       if (o.json) return json(qa);
       console.log(renderQa(qa));
     });
@@ -337,7 +391,7 @@ export function createProgram(deps: CliDeps = {}): Command {
       if (!sessionId) throw new Error("publish needs --session <id> (or CLAUDE_CODE_SESSION_ID)");
       const out = await api().request<DraftView & { result: { sent: Array<{ platform: string }> }; approvalId: string }>(
         "POST",
-        `/drafts/${id}/publish`,
+        `/drafts/${encodeURIComponent(id)}/publish`,
         { approvalId: o.approvalId, sessionId },
       );
       if (o.json) return json(out);
@@ -373,7 +427,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .option("--since <iso>", "list form: sent at or after")
     .option("--limit <n>", "list form: how many (1-500, default 100)")
     .action(async (id, o) => {
-      if (id) return json(await api().request("GET", `/drafts/${id}/evidence`));
+      if (id) return json(await api().request("GET", `/drafts/${encodeURIComponent(id)}/evidence`));
       const query = new URLSearchParams();
       if (o.platform) query.set("platform", platformOf(o.platform));
       if (o.since) query.set("since", o.since);

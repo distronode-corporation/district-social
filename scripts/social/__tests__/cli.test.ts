@@ -278,6 +278,62 @@ describe("new", () => {
     expect(h.request).not.toHaveBeenCalled();
   });
 
+  it("⛔ refuses a bad text, target, renders or spec field before the FIRST upload", async () => {
+    const img = file("first.png", "png");
+    file("vs/a.jpg", "jpg");
+    const specWith = (extra: Record<string, unknown>) =>
+      file(`vs/spec-${Math.random().toString(36).slice(2)}.json`, JSON.stringify({ media: [{ file: "a.jpg" }], ...extra }));
+    h.request.mockResolvedValue({ asset: { id: "a" } });
+
+    await expect(run("new", "-m", img)).rejects.toThrow("new needs --text");
+    await expect(run("new", "-t", "t", "-p", "li,myspace", "-m", img)).rejects.toThrow('unknown platform "myspace"');
+    await expect(run("new", "--spec", specWith({ text: "t", targets: ["myspace"] }))).rejects.toThrow(
+      'unknown platform "myspace"',
+    );
+    await expect(run("new", "--spec", specWith({ text: "t", targets: "li" }))).rejects.toThrow(
+      "targets: expected a list of strings",
+    );
+    await expect(run("new", "--spec", specWith({ text: "t", targets: ["li", 3] }))).rejects.toThrow(
+      "targets: expected a list of strings",
+    );
+    await expect(run("new", "--spec", specWith({ text: "t", renders: ["li"] }))).rejects.toThrow(
+      "renders: expected an object keyed by platform",
+    );
+    await expect(run("new", "--spec", specWith({ text: "t", renders: { myspace: {} } }))).rejects.toThrow(
+      'unknown platform "myspace"',
+    );
+    await expect(run("new", "--spec", specWith({ text: "t", assetIds: "a-1" }))).rejects.toThrow(
+      "assetIds: expected a list of strings",
+    );
+    // A second file of a type this CLI does not upload refuses before the first goes up.
+    const txt = file("second.txt", "x");
+    await expect(run("new", "-t", "t", "-m", img, txt)).rejects.toThrow(`${txt}: not an image, video or PDF`);
+    expect(h.request).not.toHaveBeenCalled();
+  });
+
+  it("⛔ refuses a spec media list that is not [{ file, alt? }] before any upload", async () => {
+    for (const media of [
+      "a.jpg",
+      [null],
+      ["a.jpg"],
+      [{ alt: "A" }],
+      [{ file: 1 }],
+      [{ file: "a.jpg", alt: 2 }],
+    ]) {
+      const spec = file("vm/spec.json", JSON.stringify({ text: "t", media }));
+      await expect(run("new", "--spec", spec)).rejects.toThrow("media: expected a list of { file, alt? } with string values");
+    }
+    expect(h.request).not.toHaveBeenCalled();
+  });
+
+  it("refuses a platform name that is only an Object.prototype key", async () => {
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      await expect(run("new", "-t", "t", "-p", name)).rejects.toThrow(`unknown platform "${name}"`);
+    }
+    await expect(run("evidence", "--platform", "valueOf")).rejects.toThrow('unknown platform "valueOf"');
+    expect(h.request).not.toHaveBeenCalled();
+  });
+
   it("refuses a file type it does not upload", async () => {
     const txt = file("notes.txt", "x");
     await expect(run("new", "-t", "t", "-m", txt)).rejects.toThrow(`${txt}: not an image, video or PDF this CLI uploads`);
@@ -330,9 +386,10 @@ describe("show", () => {
     );
     await run("show", "d1");
     expect(h.request).toHaveBeenCalledWith("GET", "/drafts/d1");
-    expect(h.renderDraft).toHaveBeenCalledWith(DRAFT);
+    expect(h.renderDraft).toHaveBeenCalledWith(DRAFT, null);
     expect(logged()).toEqual([
       "<draft>",
+      "  (length caps: the engine's spec fallback; the API sent no live rules snapshot)",
       "  leg linkedin: live urn:li:share:1 https://li/1",
       "  leg ?: legacy",
       `\nrendersHash: ${"h".repeat(64)}`,
@@ -341,6 +398,32 @@ describe("show", () => {
       "  ap1  failed-unsent  at ?  by approver@example.com at 2026-11-08T05:00:00.000Z",
       "  ap0  published  now  by approver@example.com at 2026-11-08T04:00:00.000Z",
     ]);
+  });
+
+  it("passes the API's live rules snapshot to the preview, and then prints no fallback label", async () => {
+    const rules = { fetchedAt: "2026-11-16T00:00:00.000Z", channels: {} };
+    h.request.mockResolvedValue(view({ rules }));
+    await run("show", "d1");
+    expect(h.renderDraft).toHaveBeenCalledWith(DRAFT, rules);
+    expect(logged().join("\n")).not.toContain("spec fallback");
+    h.request.mockResolvedValue(view({ rules: null }));
+    await run("show", "d1");
+    expect(h.renderDraft).toHaveBeenLastCalledWith(DRAFT, null);
+    expect(logged()).toContain("  (length caps: the engine's spec fallback; the API sent no live rules snapshot)");
+  });
+
+  it("encodes the draft id into the path, on show, qa, publish and evidence", async () => {
+    const id = "a/b?c#d";
+    const enc = "a%2Fb%3Fc%23d";
+    h.request.mockResolvedValue(view({ qa: {}, result: { sent: [] }, approvalId: "ap" }));
+    await run("show", id);
+    expect(h.request).toHaveBeenLastCalledWith("GET", `/drafts/${enc}`);
+    await run("qa", id, "--json");
+    expect(h.request).toHaveBeenLastCalledWith("POST", `/drafts/${enc}/qa`);
+    await run("publish", id, "--approval-id", "ap", "--session", "s", "--json");
+    expect(h.request).toHaveBeenLastCalledWith("POST", `/drafts/${enc}/publish`, { approvalId: "ap", sessionId: "s" });
+    await run("evidence", id);
+    expect(h.request).toHaveBeenLastCalledWith("GET", `/drafts/${enc}/evidence`);
   });
 
   it("prints JSON on --json", async () => {

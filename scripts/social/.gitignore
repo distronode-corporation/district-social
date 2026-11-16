@@ -1,6 +1,7 @@
-# No node_modules/ rule: this tool moved into the website package on 2026-07-25
-# and installs nothing of its own. config.json is covered by the repo-root
-# `*.json` rule; config.example.json is whitelisted there.
+# Machine-local CLI state, never committed. config.json holds this machine's
+# API origin and audience (config.ts reads it; config.example.json is the
+# tracked template to copy it from).
+config.json
 drafts/
 media-cache/
 *.log
