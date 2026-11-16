@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# social CLI shim: runs the TypeScript entry point through the host package's tsx.
+# social CLI shim: runs the TypeScript entry point through this repository's tsx.
 #
-# This package ships no install of its own: it uses the host package's
-# node_modules, and tsx resolves the `@/` import alias from the host's
-# tsconfig (passed explicitly, so the shim works from any cwd). Running the
-# entry under plain `node` will not work.
+# The CLI has no install of its own: it uses the node_modules at the repository
+# root (`npm ci` there), and tsx reads the root tsconfig.json, passed explicitly
+# so the shim works from any cwd. Running the entry under plain `node` will not
+# work.
 #
-# A host that injects its deployment (API origin, audience, brand pack) keeps a
-# private entry at ../social-hq-cli.ts beside this package; without one, the
-# generic cli.ts reads config.json and the env.
+# A deployment that injects its own settings (API origin, audience, brand pack)
+# keeps a private entry at scripts/social-hq-cli.ts, beside this folder; without
+# one, the generic cli.ts reads config.json and the env.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST_ROOT="$(cd "$HERE/../.." && pwd)"
