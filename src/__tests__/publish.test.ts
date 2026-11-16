@@ -202,6 +202,19 @@ describe("publishDraft guards", () => {
     const d = draft({ renders: [render({ platform: "bluesky" })] });
     await expect(publishDraft(d, {})).rejects.toThrow(/needs --now or --at/);
   });
+
+  it("refuses both now and at, before anything is uploaded or sent", async () => {
+    const { ensureUploaded } = await import("../media.js");
+    const d = draft({
+      source: { text: "Body", hashtags: [], media: [image()] },
+      renders: [render({ platform: "bluesky", mediaIndices: [0] })],
+    });
+    await expect(publishDraft(d, { now: true, at: FUTURE })).rejects.toThrow(
+      /either --now or --at, not both/,
+    );
+    expect(ensureUploaded).not.toHaveBeenCalled();
+    expect(publishNow).not.toHaveBeenCalled();
+  });
 });
 
 describe("publishDraft bookkeeping", () => {
@@ -214,6 +227,25 @@ describe("publishDraft bookkeeping", () => {
     expect(d.publishedAt).toBeTruthy();
     expect(res.providerPostId).toBe("bluesky:post-1,facebook:post-1");
     expect(d.lastError).toBeUndefined();
+  });
+
+  it("at => a leg its own preflight refuses is RECORDED at schedule time, not thrown for the whole draft", async () => {
+    // Bluesky cannot publish video. The `now` path refuses that leg alone; the
+    // scheduled path used to say nothing until the release ring tried it.
+    const d = draft({
+      source: {
+        text: "Body",
+        hashtags: [],
+        media: [{ path: "/tmp/v.mp4", type: "video", mimeType: "video/mp4", size: 5000, durationSec: 10 }],
+      },
+      renders: [render({ platform: "bluesky", mediaIndices: [0] }), render({ platform: "facebook" })],
+    });
+    const res = await publishDraft(d, { at: FUTURE });
+    expect(d.status).toBe("scheduled");
+    expect(res.providerPostId).toBe("bluesky:pending,facebook:pending");
+    expect(d.lastError).toMatch(/^bluesky: Bluesky cannot publish video yet/);
+    expect(d.lastError).not.toContain("facebook");
+    expect(publishNow).not.toHaveBeenCalled();
   });
 
   it("at => scheduled, with every leg pending for the release ring", async () => {

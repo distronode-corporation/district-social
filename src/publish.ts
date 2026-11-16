@@ -726,6 +726,16 @@ export function unknownOutcomeError(platform: Platform, reason: string): string 
   );
 }
 
+/** The video half of a leg's preflight, shared by both publish paths (see publishLeg). */
+function assertLegVideo(r: PlatformRender, draft: Draft): void {
+  if (unpublishableVideoIndices(r.platform, draft.source.media, r.mediaIndices).length > 0) {
+    throw new PublishPreflightError(
+      `${SPECS[r.platform].displayName} cannot publish video yet, and this draft's ${r.platform} render selects one. ` +
+        "Select an image for it instead, or drop it from the targets, so the other platforms in this publish can still go out.",
+    );
+  }
+}
+
 /**
  * Send ONE leg and record its outcome in place.
  *
@@ -755,12 +765,7 @@ async function publishLeg(
     // transport alike, rather than trusting each transport to refuse it (a
     // transport that drops it would post text-only). QA fails the same
     // render as `video-unsupported`, so reaching this means QA was bypassed.
-    if (unpublishableVideoIndices(r.platform, draft.source.media, r.mediaIndices).length > 0) {
-      throw new PublishPreflightError(
-        `${SPECS[r.platform].displayName} cannot publish video yet, and this draft's ${r.platform} render selects one. ` +
-          "Select an image for it instead, or drop it from the targets, so the other platforms in this publish can still go out.",
-      );
-    }
+    assertLegVideo(r, draft);
     const selected = r.mediaIndices
       .map((i) => draft.source.media[i])
       .filter((m): m is NonNullable<typeof m> => Boolean(m));
@@ -850,6 +855,12 @@ async function runPublish(
       `draft ${draft.id} was already sent (post ${draft.providerPostId}, status "${draft.status}"). ` +
         `Delete or reschedule that post instead of publishing again.`,
     );
+  }
+
+  // Mutually exclusive, and refused before any vendor read or upload: which one
+  // wins is not something to guess at on a publish.
+  if (opts.now && opts.at) {
+    throw new PublishPreflightError("publish takes either --now or --at, not both");
   }
 
   // Always live for the actual send: publishing against a stale map could target
@@ -994,6 +1005,23 @@ async function runPublish(
         }
       }),
     );
+  } else {
+    /**
+     * The scheduled path runs the same per-leg refusals publishLeg would, and
+     * RECORDS them per leg, so the operator learns at schedule time rather than
+     * when the release ring tries the leg. Not a whole-draft throw: one leg the
+     * preflight refuses must not stop the others being scheduled, exactly as on
+     * the `now` path. The leg stays `pending` and the reason lands in
+     * lastError, so a draft fixed before its release time still goes out.
+     */
+    sendable.forEach((r, i) => {
+      try {
+        assertLegVideo(r, draft);
+        assertPublishable(r, draft, r.platform === "reddit" ? redditRules : null);
+      } catch (err) {
+        outcomes[i]!.error = `${r.platform}: ${getErrorMessage(err)}`;
+      }
+    });
   }
 
   const entries = outcomes.map((o) => o.entry);
