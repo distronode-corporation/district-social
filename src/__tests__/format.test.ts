@@ -160,29 +160,35 @@ describe("format", () => {
       expect(prompt).toContain("make it punchier");
     });
 
-    it("defaults reddit subreddit from settings when the model omits one, and NORMALIZES one the model provides", async () => {
+    it("takes the reddit subreddit from settings only, NORMALIZED, and never from the model", async () => {
+      // normalizeSubreddit, shared with the publisher, QA and the settings
+      // store, not a local `replace(/^r\//, "")`. That copy was
+      // case-sensitive and missed a leading slash.
+      for (const configured of ["r/AcmeBrands", "/r/AcmeBrands", "R/acmebrands", " acmebrands "]) {
+        process.env.SOCIALMETA_DEFAULT_SUBREDDIT = configured;
+        genJsonMock.mockResolvedValue({
+          renders: [{ platform: "reddit", content: "post body", title: "A title" }],
+        });
+        const withoutSubreddit = await formatPost(source(), ["reddit"]);
+        expect(withoutSubreddit[0].subreddit).toBe("acmebrands");
+      }
+
+      // ⛔ The model's subreddit never wins over the operator's: posting to a
+      // subreddit the model picked is how a brand account gets banned.
       process.env.SOCIALMETA_DEFAULT_SUBREDDIT = "acmebrands";
       genJsonMock.mockResolvedValue({
-        renders: [
-          { platform: "reddit", content: "post body", title: "A title" },
-        ],
+        renders: [{ platform: "reddit", content: "post body", title: "A title", subreddit: "r/SaaS" }],
       });
-      const withoutSubreddit = await formatPost(source(), ["reddit"]);
-      expect(withoutSubreddit[0].subreddit).toBe("acmebrands");
+      const withModelSubreddit = await formatPost(source(), ["reddit"]);
+      expect(withModelSubreddit[0].subreddit).toBe("acmebrands");
+    });
 
-      // normalizeSubreddit, shared with the publisher, QA and the settings
-      // store — not the local `replace(/^r\//, "")` this used to do. That copy
-      // was case-sensitive and missed a leading slash, so "/r/SaaS" was stored
-      // and displayed verbatim while Postiz published to "saas".
-      for (const supplied of ["r/SaaS", "/r/SaaS", "R/SaaS", " saas "]) {
-        genJsonMock.mockResolvedValue({
-          renders: [
-            { platform: "reddit", content: "post body", title: "A title", subreddit: supplied },
-          ],
-        });
-        const withSubreddit = await formatPost(source(), ["reddit"]);
-        expect(withSubreddit[0].subreddit).toBe("saas");
-      }
+    it("drops a model-supplied subreddit when settings have none", async () => {
+      genJsonMock.mockResolvedValue({
+        renders: [{ platform: "reddit", content: "post body", title: "A title", subreddit: "r/SaaS" }],
+      });
+      const renders = await formatPost(source(), ["reddit"]);
+      expect(renders[0].subreddit).toBeUndefined();
     });
 
     it("leaves reddit subreddit undefined when neither the model nor settings provide one", async () => {

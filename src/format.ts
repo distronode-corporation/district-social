@@ -21,7 +21,6 @@ interface FormatterRender {
   title?: string;
   firstComment?: string;
   threadItems?: string[];
-  subreddit?: string;
   mediaIndices?: number[];
   rationale?: string;
 }
@@ -44,7 +43,6 @@ function formatterSchema(platforms: Platform[]): Record<string, unknown> {
             title: { type: "string" },
             firstComment: { type: "string" },
             threadItems: { type: "array", items: { type: "string" } },
-            subreddit: { type: "string" },
             mediaIndices: { type: "array", items: { type: "integer" } },
             rationale: { type: "string" },
           },
@@ -122,7 +120,7 @@ ${specBlock(eligible, brand)}
 ${rulesBlock(channelRules ?? null, eligible)}
 
 ## Output
-Return JSON: {"renders": [{"platform": "...", "content": "...", "title": "...", "firstComment": "...", "threadItems": ["..."], "subreddit": "...", "mediaIndices": [0], "rationale": "..."}]}
+Return JSON: {"renders": [{"platform": "...", "content": "...", "title": "...", "firstComment": "...", "threadItems": ["..."], "mediaIndices": [0], "rationale": "..."}]}
 
 Rules:
 - One render per target platform, platform ids exactly: ${eligible.join(", ")}.
@@ -130,7 +128,7 @@ Rules:
 - Only include "title" where the platform uses one (youtube required <=100 chars, reddit required <=300 chars, pinterest strongly recommended <=100 chars because the feed shows the title and image, not the description).
 - Only include "firstComment" where the platform rules above say "firstComment supported" and it is useful (e.g. Instagram hashtag overflow). Where they say it is NOT published, leave it out: that text never goes out.
 - Only include "threadItems" (full sequence INCLUDING the first post as item 0) if the content genuinely needs a thread; otherwise omit.
-- "subreddit" only for reddit${def.subreddit ? ` (use exactly: ${def.subreddit})` : ". OMIT this field entirely. Do NOT invent, guess, or infer a subreddit: posting promotional content to an unvetted subreddit is spam and gets the account banned. Leaving it out is correct and safe, because a later step supplies the operator's configured subreddit and QA blocks the post if none is set"}.
+- Never include a subreddit. The operator configures it, and a later step supplies it.
 - "mediaIndices": which source media items to attach for this platform (respect platform media rules; youtube must be video indices only, and a platform marked "Cannot publish video" must never get a video index; omit to attach all). Generated brand-card sets are routed by code after you, so never attach more than one near-identical image.
 - "rationale": one sentence on the platform-specific choices you made.
 - Never use em-dashes anywhere.
@@ -167,15 +165,13 @@ Rules:
       title: r.title?.trim() || undefined,
       firstComment: r.firstComment?.trim() || undefined,
       threadItems: replies?.length ? replies : undefined,
-      // The shared normalizer, not a local strip: the hand-rolled version here
-      // was case-sensitive and missed a leading slash, so "/r/SaaS" survived as
-      // "/r/SaaS" while the publisher, the QA gate and the settings store all
-      // resolved it to "saas". What we stored and showed then differed from
-      // what was actually published.
-      subreddit:
-        p === "reddit"
-          ? normalizeSubreddit(r.subreddit) ?? normalizeSubreddit(def.subreddit)
-          : undefined,
+      // ⛔ The operator's configured subreddit ONLY. The model's value is
+      // ignored: a subreddit the model picked could outrank the configured one,
+      // and posting promotional copy to an unvetted subreddit gets the account
+      // banned. With none configured, QA blocks the post. The shared
+      // normalizer, not a local strip, so what is stored and shown is what the
+      // publisher, the QA gate and the settings store resolve.
+      subreddit: p === "reddit" ? normalizeSubreddit(def.subreddit) : undefined,
       mediaIndices,
       rationale: r.rationale,
       generatedBy: modelStamp(),
