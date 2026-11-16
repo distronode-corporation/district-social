@@ -1,0 +1,6 @@
+# No node_modules/ rule: this tool moved into the website package on 2026-07-25
+# and installs nothing of its own. config.json is covered by the repo-root
+# `*.json` rule; config.example.json is whitelisted there.
+drafts/
+media-cache/
+*.log

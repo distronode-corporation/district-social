@@ -1,0 +1,14 @@
+# district-social publish scope: the files that leave this repository for the public package.
+#
+# Paths are relative to the website root. A file is in scope when an include matches it and no
+# exclude does ("**" crosses directories, "*" does not). Everything in scope must pass the scrub
+# gate (scripts/district-social-scrub.mjs) at zero hits, and the public repository is seeded from
+# exactly this list.
+
+include src/lib/social-hq/engine/**
+include scripts/social/**
+
+# Brand material: the operator's own marketing, store listings and brand brief, not CLI code.
+exclude scripts/social/campaigns/**
+exclude scripts/social/profiles/**
+exclude scripts/social/brand.md
