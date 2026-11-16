@@ -179,10 +179,13 @@ describe.runIf(enabled)("facebook transport live proof", () => {
     console.log(`[proof] deleted ${posted.ref}`);
 
     // Step 3: it is REALLY gone. A 200 from the delete is exactly what this
-    // test refuses to accept as evidence.
-    const factsAfter = await facebookTransport.postFacts([posted.ref]);
-    expect(factsAfter.get(posted.ref)).toMatchObject({ released: false });
-    expect(factsAfter.get(posted.ref)?.state).not.toBe("PUBLISHED");
+    // test refuses to accept as evidence, and so is postFacts: it is the
+    // transport's own reading of Meta and the thing under test. A direct read
+    // must fail with Meta's not-found wording; a timeout or a rate limit also
+    // throws, and neither is evidence of a deletion.
+    await expect(
+      graphRequest<{ id: string }>(posted.ref, { params: { fields: "id" }, accessToken: pageToken, appSecret }),
+    ).rejects.toThrow(/does not exist|cannot be loaded/i);
   });
 
   /**
@@ -268,10 +271,15 @@ describe.runIf(enabled)("facebook transport live proof", () => {
         // Guaranteed cleanup: any assertion above can throw before or between
         // the deletes, and a failed proof must still remove what it created.
         // deletePost is idempotent by contract, so repeating it is free.
-        await facebookTransport.deletePost(posted.ref).catch((err: unknown) => {
-          console.error(`⛔ [proof] could not clean up ${posted.ref}: ${String(err)}`);
-        });
-        artifacts.untrack(posted.ref);
+        // ⛔ Untracked only after a delete that succeeded: a failed cleanup
+        // stays tracked, so the afterAll sweep tries again and, failing that,
+        // names the post to delete by hand.
+        await facebookTransport.deletePost(posted.ref).then(
+          () => artifacts.untrack(posted.ref),
+          (err: unknown) => {
+            console.error(`⛔ [proof] could not clean up ${posted.ref}: ${String(err)}`);
+          },
+        );
       }
     },
   );

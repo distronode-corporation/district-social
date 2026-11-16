@@ -26,7 +26,7 @@
  *     --project=node
  */
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getPermalink, setThreadsCredentialsResolver } from "../threads.js";
+import { getPermalink, isThreadsNotFound, setThreadsCredentialsResolver } from "../threads.js";
 import { threadsTransport } from "../threads-transport.js";
 import { useLiveNetwork } from "./helpers/live-network.js";
 import { proofArtifacts } from "./helpers/proof-artifacts.js";
@@ -96,11 +96,18 @@ describe.runIf(enabled)("threads transport live proof", () => {
     artifacts.untrack(posted.ref);
     console.log(`[proof] deleted ${posted.ref}`);
 
-    // Step 3: it is REALLY gone, asserted on what the vendor reports rather
-    // than on the delete call's status code.
-    const factsAfter = await threadsTransport.postFacts([posted.ref]);
-    expect(factsAfter.get(posted.ref)).toMatchObject({ released: false });
-    expect(factsAfter.get(posted.ref)?.state).not.toBe("PUBLISHED");
+    // Step 3: it is REALLY gone, asserted on a direct read from the vendor
+    // rather than on the delete call's status code or on postFacts (the
+    // transport's own reading, and the thing under test). The read must fail
+    // as not-found: a timeout or a rate limit also throws, and neither is
+    // evidence of a deletion.
+    const readErr = await getPermalink(posted.ref).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(isThreadsNotFound(readErr), `the read after delete did not fail as not-found: ${String(readErr)}`).toBe(
+      true,
+    );
   });
 
   /**

@@ -164,10 +164,13 @@ describe.runIf(enabled)("instagram transport live proof", () => {
     artifacts.untrack(posted.ref);
     console.log(`[proof] deleted ${posted.ref}`);
 
-    // Step 3: it is REALLY gone.
-    const factsAfter = await instagramTransport.postFacts([posted.ref]);
-    expect(factsAfter.get(posted.ref)).toMatchObject({ released: false });
-    expect(factsAfter.get(posted.ref)?.state).not.toBe("PUBLISHED");
+    // Step 3: it is REALLY gone, asserted on a direct read from Meta rather
+    // than on postFacts (the transport's own reading, and the thing under
+    // test). The read must fail with Meta's not-found wording: a timeout or a
+    // rate limit also throws, and neither is evidence of a deletion.
+    await expect(
+      graphRequest<{ id: string }>(posted.ref, { params: { fields: "id" }, accessToken: pageToken, appSecret }),
+    ).rejects.toThrow(/does not exist|cannot be loaded/i);
   });
 
   it("treats deleting an already-deleted post as success", async () => {

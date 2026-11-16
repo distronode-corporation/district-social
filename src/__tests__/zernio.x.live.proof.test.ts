@@ -10,8 +10,9 @@ import { requireEnv } from "./helpers/proof-env.js";
  *
  * ⚠️ THIS WRITES TO A REAL ACCOUNT AND IT COSTS MONEY: the X account connected
  * to the Zernio key, which must be ZERNIO_X_EXPECTED_ACCOUNT. It creates one
- * plain-text post, reads it back, deletes it (in a `finally`), and confirms it
- * is gone. It is a separate file from the reddit proof, on a separate env flag,
+ * plain-text post, reads it back, deletes it (in a `finally`), reads it back
+ * again to confirm the vendor no longer reports it published, and deletes it a
+ * second time to prove the delete is idempotent. It is a separate file from the reddit proof, on a separate env flag,
  * for exactly that reason: the reddit proof is free and can be re-run freely,
  * this one has a bill attached and must be a deliberate act every single time.
  *
@@ -133,6 +134,10 @@ describe.runIf(RUN)("zernio live X publish proof", () => {
    * live, billed post on the account with nothing holding its id.
    */
   it("publishes, reads back, deletes, and confirms it is gone", async () => {
+    // ⛔ The cost gate, again and FIRST: vitest does not bail after a failed
+    // `it`, so the row above failing would not stop this billed publish.
+    expect(CONTENT).not.toMatch(URLISH);
+
     // Re-checked here, not only in its own row: vitest does not bail after a
     // failed `it`, and the wrong account must never get the post.
     const accounts = await listAccounts();
@@ -168,6 +173,12 @@ describe.runIf(RUN)("zernio live X publish proof", () => {
       await zernioAggregator.deletePost("twitter", published.ref);
       console.log(`[x-proof] deleted ${published.ref}`);
     }
+
+    // Confirm gone: the vendor no longer reports it published. A delete that
+    // resolved is not evidence on its own.
+    const after = await zernioAggregator.postFacts("twitter", [published.ref]);
+    expect(after.get(published.ref)).toMatchObject({ released: false });
+    expect(after.get(published.ref)?.state).not.toBe("PUBLISHED");
 
     // Idempotent by contract: "already gone" is a 400 from this vendor, not a
     // 404, and deletePost has to absorb both or a retry looks permanently stuck.

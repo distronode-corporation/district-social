@@ -104,6 +104,17 @@ describe.runIf(enabled)("pinterest transport live proof", () => {
     setPinterestTokenResolver(async () => env.PINTEREST_TOKEN);
   });
 
+  /**
+   * Re-assert the account. Called as the FIRST statement of every test that
+   * publishes: vitest does not bail after a failed `it`, so the connect row
+   * above failing on the wrong account would not stop a pin going to it.
+   */
+  async function requireAccount(): Promise<void> {
+    const status = await pinterestTransport.connectStatus();
+    expect(status.reason ?? "").toBe("");
+    expect(status.accountId).toBe(env.PINTEREST_EXPECTED_ACCOUNT);
+  }
+
   it("has an image to pin", () => {
     // Asserted separately and first, so a malformed PROOF_IMAGE_URL fails as
     // itself rather than as an opaque vendor error two tests later. Pinterest
@@ -145,6 +156,8 @@ describe.runIf(enabled)("pinterest transport live proof", () => {
   });
 
   it("publishes a pin, then deletes it and reports what Pinterest says after", async () => {
+    await requireAccount();
+
     const render: PlatformRender = {
       platform: "pinterest",
       // No URL in the copy on purpose: Pinterest carries the destination as its
@@ -199,6 +212,8 @@ describe.runIf(enabled)("pinterest transport live proof", () => {
    * "already gone" threw, both cases would strand the leg forever.
    */
   it("treats deleting an already-deleted pin as success", async () => {
+    await requireAccount();
+
     const render: PlatformRender = {
       platform: "pinterest",
       content: `district-social idempotent-delete self-test ${STAMP}: deleted automatically.`,

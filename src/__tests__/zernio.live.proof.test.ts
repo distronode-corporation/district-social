@@ -11,11 +11,14 @@ import { requireEnv } from "./helpers/proof-env.js";
  * CI never posts anything.
  *
  * ⚠️ THIS WRITES TO A REAL ACCOUNT: the Reddit account connected to the Zernio
- * key, which must be ZERNIO_REDDIT_EXPECTED_ACCOUNT. It creates a text post in
+ * key, which must be ZERNIO_REDDIT_EXPECTED_ACCOUNT (re-checked inside the
+ * publishing test, right before the post). It creates a text post in
  * ZERNIO_REDDIT_SUBREDDIT, reads it back, deletes it (in a `finally`, so a
- * failed assertion still cleans up), and confirms what the vendor says
- * afterwards. The post is live for the few seconds in between. That is not a
- * side effect to tolerate: it IS the proof, and there is no other way to get it.
+ * failed assertion still cleans up), reads it back again to confirm the vendor
+ * no longer reports it published, and deletes it a second time to prove the
+ * delete is idempotent. The post is live for the few seconds in between. That
+ * is not a side effect to tolerate: it IS the proof, and there is no other way
+ * to get it.
  *
  * ⛔ A SUBREDDIT YOU MODERATE, AND THAT IS LOAD-BEARING. A test post in your
  * own subreddit is not spam and cannot draw a community's mod action. In any
@@ -24,8 +27,8 @@ import { requireEnv } from "./helpers/proof-env.js";
  * Never point it at a real community.
  *
  * ⛔ THIS FILE IS REDDIT ONLY. Other platforms can be connected on the same
- * key, and some (X) bill per post through Zernio's pass-through. This file
- * hard-refuses any platform but reddit; X has its own file and its own flag.
+ * key, and some (X) bill per post through Zernio's pass-through. Every call in
+ * this file names "reddit" as a literal; X has its own file and its own flag.
  *
  * ⚠️ FIDELITY GAP, STATED PLAINLY. This injects the key raw from env, which
  * exercises the client and the aggregator but NOT however a deployment stores
@@ -82,14 +85,13 @@ describe.runIf(RUN)("zernio live publish proof", () => {
   });
 
   /**
-   * ⛔ THE SAFETY GATE, ASSERTED AS ITS OWN ROW. vitest does not bail on a
-   * previously failed `it`, so this cannot live only in a beforeAll.
+   * A configuration check, asserted as its own row so a subreddit given as
+   * `r/name` fails as itself rather than as a vendor error at publish time.
    */
-  it("is pointed at reddit and at the configured subreddit only", () => {
-    const sub = input(env.ZERNIO_REDDIT_SUBREDDIT).destination.subreddit;
-    expect(sub).toBe(env.ZERNIO_REDDIT_SUBREDDIT);
-    expect(sub, "ZERNIO_REDDIT_SUBREDDIT is the bare name, without r/").not.toMatch(/^\/?r\//);
-    expect(input(env.ZERNIO_REDDIT_SUBREDDIT).render.platform).toBe("reddit");
+  it("is configured with a bare subreddit name", () => {
+    expect(env.ZERNIO_REDDIT_SUBREDDIT, "ZERNIO_REDDIT_SUBREDDIT is the bare name, without r/").not.toMatch(
+      /^\/?r\//,
+    );
   });
 
   it("resolves the connected reddit account", async () => {
@@ -113,6 +115,11 @@ describe.runIf(RUN)("zernio live publish proof", () => {
    * would let a failure in the middle strand it.
    */
   it("publishes, reads back, deletes, and confirms it is gone", async () => {
+    // Re-checked here, not only in its own row: vitest does not bail after a
+    // failed `it`, and the wrong account must never get the post.
+    const accounts = await listAccounts();
+    expect(accounts.find((a) => a.platform === "reddit")?.username).toBe(env.ZERNIO_REDDIT_EXPECTED_ACCOUNT);
+
     const published = await zernioAggregator.publishNow("reddit", input(env.ZERNIO_REDDIT_SUBREDDIT));
 
     console.log(`[proof] published ${published.ref} -> ${published.url ?? "(no url)"}`);
@@ -136,7 +143,13 @@ describe.runIf(RUN)("zernio live publish proof", () => {
       console.log(`[proof] deleted ${published.ref}`);
     }
 
-    // Confirm gone. Idempotent by contract, so a second delete must not throw.
+    // Confirm gone: the vendor no longer reports it published. A delete that
+    // resolved is not evidence on its own.
+    const after = await zernioAggregator.postFacts("reddit", [published.ref]);
+    expect(after.get(published.ref)).toMatchObject({ released: false });
+    expect(after.get(published.ref)?.state).not.toBe("PUBLISHED");
+
+    // Idempotent by contract, so a second delete must not throw.
     await expect(
       zernioAggregator.deletePost("reddit", published.ref),
     ).resolves.toBeUndefined();
