@@ -892,7 +892,7 @@ export async function uploadMediaAsset(
   // about `https://10.0.0.5/` or a name that resolves into the origin's own
   // private network, so a compromised or spoofed lease response could still
   // aim this multipart POST at an internal service. Reuse the repo's existing
-  // guard (ssrf.ts, re-exported at src/lib/ssrf.ts) rather than growing a
+  // guard (src/ssrf.ts) rather than growing a
   // second one here: it resolves the host ONCE, rejects private/reserved
   // addresses, and hands back an undici
   // dispatcher pinned to the address it validated so `fetch` cannot re-resolve
