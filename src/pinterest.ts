@@ -446,8 +446,8 @@ const RECENT_PINS_PAGE_SIZE = 25;
 /**
  * `GET /pins`, the authenticated account's own Pins, first page only, for the
  * agent publish's crash check. Pinterest documents no order for this list, so
- * the caller proves the window from the times (recent-posts.ts windowCovers)
- * rather than trusting one.
+ * the page says so (`unordered`), and windowCovers proves the window only when
+ * there are no further pages.
  */
 export async function listRecentPins(): Promise<RecentPostsPage> {
   const page = await request<{
@@ -466,7 +466,7 @@ export async function listRecentPins(): Promise<RecentPostsPage> {
         ]
       : [],
   );
-  return { posts, more: Boolean(page.bookmark) };
+  return { posts, more: Boolean(page.bookmark), unordered: true };
 }
 
 function toUtcIso(value: string): string | null {

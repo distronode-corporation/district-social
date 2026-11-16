@@ -78,6 +78,19 @@ describe("windowCovers and postsSince", () => {
     expect(windowCovers({ posts: [], more: true }, SINCE)).toBe(false);
   });
 
+  it("never covers a paged window from a list with NO documented order, however the times line up", () => {
+    // Pinterest's GET /pins documents no order: a page that happens to read
+    // newest first says nothing about what the unread pages hold.
+    const looksOrdered: RecentPostsPage = {
+      posts: [post("a", "2026-11-08T05:10:00Z"), post("b", "2026-11-08T04:00:00Z")],
+      more: true,
+      unordered: true,
+    };
+    expect(windowCovers(looksOrdered, SINCE)).toBe(false);
+    // With no more pages, the whole list was read, order or not.
+    expect(windowCovers({ ...looksOrdered, more: false }, SINCE)).toBe(true);
+  });
+
   it("keeps the posts at or after the start, and any post with no time", () => {
     const page: RecentPostsPage = {
       posts: [post("new", "2026-11-08T05:00:00Z"), post("none", null), post("old", "2026-11-08T04:59:59Z")],
@@ -257,8 +270,9 @@ describe("Pinterest read", () => {
         { id: "P4", texts: [], createdAt: null },
       ],
       more: true,
+      unordered: true,
     });
     fetchMock.mockResolvedValueOnce(json({ bookmark: null }));
-    expect(await listRecentPins()).toEqual({ posts: [], more: false });
+    expect(await listRecentPins()).toEqual({ posts: [], more: false, unordered: true });
   });
 });

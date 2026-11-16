@@ -30,6 +30,11 @@ export interface RecentPostsPage {
   posts: RecentPost[];
   /** The platform returned a next-page cursor that was not followed. */
   more: boolean;
+  /**
+   * The platform documents no order for this list (Pinterest's `GET /pins`),
+   * so the times on one page cannot prove what the unread pages hold.
+   */
+  unordered?: boolean;
 }
 
 /**
@@ -54,11 +59,13 @@ function time(p: RecentPost): number {
  * Whether `page` saw every post made since `since`.
  *
  * True when the platform had no more pages. With more pages, true only when
- * the posts are newest first AND the last one is older than `since`: then the
- * pages not fetched are older still. Anything else is unproven.
+ * the list has a documented order, the posts are newest first AND the last
+ * one is older than `since`: then the pages not fetched are older still.
+ * Anything else is unproven.
  */
 export function windowCovers(page: RecentPostsPage, since: Date): boolean {
   if (!page.more) return true;
+  if (page.unordered) return false;
   const times = page.posts.map(time);
   const newestFirst = times.every((t, i) => i === 0 || t <= times[i - 1]!);
   const last = times[times.length - 1];

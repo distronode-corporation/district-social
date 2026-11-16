@@ -171,13 +171,19 @@ async function collectImages(media: MediaAsset[]): Promise<PinterestImageSource[
 const PINTEREST_ALT_TEXT_MAX = 500;
 
 export function combinedAltText(imageCount: number, media: MediaAsset[]): string | undefined {
-  const alts = media.filter((m) => m.type === "image").map((m) => m.altText?.trim() ?? "");
+  // Only the images the pin carries (collectImages sends the first imageCount).
+  const alts = media
+    .filter((m) => m.type === "image")
+    .slice(0, imageCount)
+    .map((m) => m.altText?.trim() ?? "");
   const described = alts.filter(Boolean);
   if (!described.length) return undefined;
 
-  // A single-image pin reads naturally with no numbering.
+  // A single-image pin reads naturally with no numbering. A carousel is
+  // numbered even when only one slide is described: unnumbered, that one
+  // description reads as the whole pin's, with no signal that more slides exist.
   const joined =
-    imageCount === 1 || described.length === 1
+    imageCount === 1
       ? described[0]
       : alts.map((alt, i) => `${i + 1}. ${alt || "(no description provided)"}`).join(" ");
 

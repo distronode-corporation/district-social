@@ -154,6 +154,18 @@ describe("pinterest alt text", () => {
     );
   });
 
+  it("numbers a carousel even when only ONE slide is described, so it never reads as the whole pin's", async () => {
+    const { combinedAltText } = await import("../pinterest-transport.js");
+    expect(combinedAltText(2, [image("a.jpg"), image("b.jpg", "A blue door")])).toBe(
+      "1. (no description provided) 2. A blue door",
+    );
+  });
+
+  it("describes only the images the pin carries", async () => {
+    const { combinedAltText } = await import("../pinterest-transport.js");
+    expect(combinedAltText(1, [image("a.jpg"), image("b.jpg", "Never sent")])).toBeUndefined();
+  });
+
   it("returns undefined when nothing is described, rather than an empty string", async () => {
     const { combinedAltText } = await import("../pinterest-transport.js");
     expect(combinedAltText(2, [image("a.jpg"), image("b.jpg")])).toBeUndefined();
