@@ -5,8 +5,8 @@ negotiable.
 
 ## Status
 
-The repository is pre-release scaffolding: `src/index.ts` is an empty module, and the
-gate below passes on it. The rules apply from the first line of real code.
+The engine (`src/`) and the CLI (`scripts/social/`) are here and pass the gate below. The
+package is not on npm yet (see the README for installing from source).
 
 ## Setup
 
