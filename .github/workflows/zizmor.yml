@@ -1,10 +1,11 @@
 name: zizmor
 
 # Static analysis of these workflows: template injection, over-broad token permissions,
-# credential persistence, cache poisoning on the release path. Two modes, because SARIF
-# mode suppresses zizmor's exit codes and a fork's pull request cannot upload SARIF:
-#   push / dispatch   SARIF to code scanning (category `zizmor`), no gate
-#   pull_request      annotations, and the job FAILS on a finding
+# credential persistence, cache poisoning on the release path. Two jobs, because SARIF mode
+# suppresses zizmor's exit codes and a fork's pull request cannot upload SARIF:
+#   zizmor        pull requests: annotations, and the job FAILS on a finding. Read-only.
+#   zizmor-sarif  push / dispatch: SARIF to code scanning (category `zizmor`), no gate. The
+#                 only job holding `security-events: write`.
 # Suppressions are inline `# zizmor: ignore[...]` comments with a reason.
 on:
   push:
@@ -12,7 +13,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Nothing at the top level; the job asks for what it needs.
+# Nothing at the top level; each job asks for what it needs.
 permissions: {}
 
 concurrency:
@@ -21,12 +22,11 @@ concurrency:
 
 jobs:
   zizmor:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read # check out the code
-      # Upload the SARIF to code scanning.
-      security-events: write
     steps:
       - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
@@ -38,5 +38,26 @@ jobs:
       - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           version: 1.30.1
-          advanced-security: ${{ github.event_name != 'pull_request' }}
-          annotations: ${{ github.event_name == 'pull_request' }}
+          advanced-security: false
+          annotations: true
+
+  zizmor-sarif:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out the code
+      security-events: write # upload the SARIF to code scanning
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          version: 1.30.1
+          advanced-security: true
+          annotations: false

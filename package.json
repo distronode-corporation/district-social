@@ -36,7 +36,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage --passWithNoTests",
-    "check": "npm run lint && npm run typecheck && npm test"
+    "check": "npm run lint && npm run typecheck && npm run build && npm test"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

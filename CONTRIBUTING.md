@@ -14,7 +14,7 @@ You need Node.js 24 (`.nvmrc`, what CI uses) and npm 11.
 
 ```
 npm ci             # install exactly what package-lock.json says
-npm run check      # lint, type-check and the tests with coverage, in that order
+npm run check      # lint, type-check, build and the tests with coverage, in that order
 ```
 
 `npx vitest run <file>` runs one test file. Tests need no network: anything that talks to a
@@ -26,18 +26,20 @@ This is every job in `.github/workflows/ci.yml`. All of it must be green on a pu
 
 ```
 npm ci
-npm run lint        # eslint, typescript-eslint's recommended rules
+npm run lint        # eslint, typescript-eslint's strict type-checked rules
 npm run typecheck   # tsc --noEmit, strict, sources, tests and configs included
+npm run build       # tsc -p tsconfig.build.json, the dist/ that release.yml publishes
 npm test            # vitest run --coverage, thresholds at 100 percent
 ```
 
 The other workflows run checks that need no setup on your side: CodeQL, OpenSSF Scorecard,
 dependency review, zizmor on the workflows, gitleaks on the history, and a licence allowlist
-over `package-lock.json` (`node .github/scripts/check-licenses.mjs` runs it locally).
+over `package-lock.json` (`node .github/scripts/check-licenses.mjs --self-test`, then
+without the flag, runs it locally).
 
 ## Coverage is 100 percent
 
-Every file under `src/` is held at 100 percent line, branch, function and statement coverage,
+Every source file under `src/` (test files aside) is held at 100 percent line, branch, function and statement coverage,
 per file, by the thresholds in `vitest.config.ts`. The rules that go with it:
 
 - A reachable branch gets a test. Guards and parsers get hostile input, not just the
@@ -57,7 +59,9 @@ per file, by the thresholds in `vitest.config.ts`. The rules that go with it:
 - **At least 7 days old.** A new dependency, or a new version of an existing one, must have
   been published at least seven days before the pull request adds it. A compromised
   release is usually caught and pulled within days; the wait keeps it out of this tree.
-  Dependabot applies the same 7-day cooldown to its own updates.
+  Dependabot applies the same 7-day cooldown to its routine version updates. A security
+  update is the exception: Dependabot opens it as soon as the advisory lands, and a person
+  reviews it like any other change.
 - **Overrides are for advisories.** `overrides.minimatch` lifts eslint's and
   typescript-eslint's `minimatch` 10.x to a release with the fix for GHSA-g3hv-75wg-m249
   (patched in 11.0.1). Drop it once both depend on a patched range.
@@ -71,6 +75,9 @@ per file, by the thresholds in `vitest.config.ts`. The rules that go with it:
 
 A release is a `vX.Y.Z` tag on main, and `.github/workflows/release.yml` publishes the package
 to npm from it, with trusted publishing (no stored token) and a provenance attestation. The
+publish job runs only while the `NPM_PUBLISH` repository variable is `true`; otherwise a tag
+runs the checks and packs the tarball, and nothing is published, so a green tag run is not
+proof of a release. The
 version bump is a pull request first: it sets `version` in `package.json` and
 `package-lock.json`, and moves the CHANGELOG's Unreleased section to `[X.Y.Z]`. A release is
 never re-tagged: a bad one gets a new patch version.

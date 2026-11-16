@@ -33,4 +33,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
+      # The expression parser against known answers first, then the lockfile.
+      - run: node .github/scripts/check-licenses.mjs --self-test
       - run: node .github/scripts/check-licenses.mjs

@@ -6,7 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Release workflow note: `.github/workflows/release.yml` publishes to npm from a `vX.Y.Z` tag
-whose version equals `package.json`. Move the Unreleased section to `## [X.Y.Z] - YYYY-MM-DD`
+whose version equals `package.json`, and only while the `NPM_PUBLISH` repository variable is
+`true`; otherwise a tag runs the checks and packs the tarball without publishing. Move the Unreleased section to `## [X.Y.Z] - YYYY-MM-DD`
 in the version bump, before the tag.
 
 ## [Unreleased]
