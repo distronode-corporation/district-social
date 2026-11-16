@@ -149,11 +149,10 @@ Rules:
     // mid-publish crash after media has already uploaded (the schema makes
     // them integers, not in range). Then the video routing (media-pick.ts): a
     // video goes only where publishesVideo.
-    const mediaIndices = routeModelMediaIndices(
-      p,
-      source.media,
-      r.mediaIndices?.filter((i) => i >= 0 && i < source.media.length),
-    );
+    // Deduped after the range filter: a repeated index would attach (and
+    // upload) the same asset twice on one post.
+    const inRange = r.mediaIndices?.filter((i) => i >= 0 && i < source.media.length);
+    const mediaIndices = routeModelMediaIndices(p, source.media, inRange && [...new Set(inRange)]);
     // The prompt asks for the whole thread with the root as item 0; a render
     // stores replies only (types.ts), so item 0 becomes the body and the rest
     // the replies.

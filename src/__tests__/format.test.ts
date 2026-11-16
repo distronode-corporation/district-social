@@ -418,6 +418,15 @@ describe("format", () => {
       const renders = await formatPost(src, ["facebook"]);
       expect(renders[0].mediaIndices).toEqual([1]);
     });
+
+    it("dedupes the model's mediaIndices after the range filter, so one asset never posts twice", async () => {
+      genJsonMock.mockResolvedValue({
+        renders: [{ platform: "facebook", content: "x", mediaIndices: [1, 0, 1, 7, 0] }],
+      });
+      const src = source({ media: [image(), image({ path: "/tmp/2.jpg" })] });
+      const renders = await formatPost(src, ["facebook"]);
+      expect(renders[0].mediaIndices).toEqual([1, 0]);
+    });
   });
 
   describe("skippedForMedia", () => {
