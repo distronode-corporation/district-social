@@ -889,8 +889,14 @@ async function runPublish(
   // PublishNotSentError); up to two sibling uploads in the same chunk may
   // finish before it does, which is harmless: their bytes are the operator's
   // own media.
-  for (let i = 0; i < draft.source.media.length; i += MEDIA_UPLOAD_CONCURRENCY) {
-    const chunk = draft.source.media.slice(i, i + MEDIA_UPLOAD_CONCURRENCY);
+  // Only the union of what the sendable renders SELECT (after the card
+  // normalization above): an unselected asset, or one only a skipped render
+  // picked, is never published, so uploading it would put the operator's bytes
+  // on a public URL for nothing.
+  const selectedIndices = new Set(sendable.flatMap((r) => r.mediaIndices));
+  const toUpload = draft.source.media.filter((_m, i) => selectedIndices.has(i));
+  for (let i = 0; i < toUpload.length; i += MEDIA_UPLOAD_CONCURRENCY) {
+    const chunk = toUpload.slice(i, i + MEDIA_UPLOAD_CONCURRENCY);
     await Promise.all(chunk.map((m) => ensureUploaded(m)));
   }
 

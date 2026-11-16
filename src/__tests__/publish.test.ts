@@ -244,7 +244,7 @@ describe("publishDraft bookkeeping", () => {
     expect(d.status).toBe("scheduled");
   });
 
-  it("uploads every source asset before publishing", async () => {
+  it("uploads each selected source asset before publishing", async () => {
     const d = draft({
       source: { text: "Body", hashtags: [], media: [image()] },
       renders: [render({ platform: "bluesky", mediaIndices: [0] })],
@@ -254,6 +254,36 @@ describe("publishDraft bookkeeping", () => {
     expect(publishNow).toHaveBeenCalledWith(
       expect.objectContaining({ media: [expect.objectContaining({ url: expect.any(String) })] }),
     );
+  });
+
+  it("uploads only the assets a sendable render selected, never the rest", async () => {
+    // A skipped (unconnected) render's selection is not uploaded either.
+    connectStatus.mockImplementation(async () => ({ connected: true, accountId: "acct-1", displayName: "Acme" }));
+    const { ensureUploaded } = await import("../media.js");
+    const d = draft({
+      source: {
+        text: "Body",
+        hashtags: [],
+        media: [
+          { ...image(), path: "/tmp/a.jpg" },
+          { ...image(), path: "/tmp/b.jpg" },
+          { ...image(), path: "/tmp/c.jpg" },
+          { ...image(), path: "/tmp/d.jpg" },
+        ],
+      },
+      renders: [
+        render({ platform: "bluesky", mediaIndices: [2] }),
+        render({ platform: "facebook", mediaIndices: [2, 0] }),
+        render({ platform: "linkedin", mediaIndices: [3] }),
+      ],
+    });
+    await publishDraft(d, { now: true, skipUnconnected: true });
+    const uploaded = (ensureUploaded as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => (c[0] as MediaAsset).path,
+    );
+    expect(uploaded.sort()).toEqual(["/tmp/a.jpg", "/tmp/c.jpg"]);
+    expect(d.source.media[1]!.url).toBeUndefined();
+    expect(d.source.media[3]!.url).toBeUndefined();
   });
 
   it("hands the transport only the assets its render selected", async () => {
