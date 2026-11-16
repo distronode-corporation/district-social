@@ -1,0 +1,646 @@
+/**
+ * Bluesky (AT Protocol) vendor client.
+ *
+ * Every raw call to the vendor lives here, and nothing above this file touches
+ * @atproto/api directly (publishing is direct per platform). Two things this
+ * file owns that an aggregator never has to think about:
+ *
+ *   - a session. An aggregator holds one static API key; Bluesky needs a logged-in
+ *     account, and com.atproto.server.createSession is rate-limited per
+ *     account. See getAgent() for why the session is opened lazily and cached
+ *     for the life of the process rather than per call.
+ *   - facets. Bluesky does not autolink. A post with a bare URL and no facet
+ *     is dead text (scripts/social/platform-reference.md), so
+ *     buildRichText is the one place a real facet gets attached.
+ *
+ * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ */
+
+import type {
+  Agent,
+  AppBskyFeedDefs,
+  AppBskyRichtextFacet,
+  AtpSessionData,
+  BlobRef,
+  ComAtprotoRepoStrongRef,
+} from "@atproto/api";
+import { getErrorMessage } from "./error-message.js";
+import type { RecentPostsPage } from "./recent-posts.js";
+// The engine's own capped reader (read-capped.ts), shared with media-fetch.ts.
+import { readCappedBody } from "./read-capped.js";
+
+/**
+ * ⛔ `@atproto/api` IS LOADED LAZILY, NEVER AS A STATIC VALUE IMPORT.
+ *
+ * Its dependency `multiformats` publishes `./cid` with an `import` condition
+ * only. A static `import { Agent } from "@atproto/api"` is fine under Next and
+ * vitest (both bundle ESM), but the Social HQ CLI runs through tsx in a
+ * CommonJS package, and tsx's CJS resolver then fails at module load with
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED: ./cid` before a single command runs, on a
+ * clean install too (so not a stale node_modules).
+ *
+ * A dynamic `import()` resolves the `import` condition from any runner. It is
+ * awaited once and cached; every network path goes through getAgent(), so the
+ * module is always loaded before anything that could throw an XRPCError.
+ */
+type AtprotoApi = typeof import("@atproto/api");
+let _api: AtprotoApi | null = null;
+let _apiPromise: Promise<AtprotoApi> | null = null;
+async function atproto(): Promise<AtprotoApi> {
+  if (_api) return _api;
+  _apiPromise ??= import("@atproto/api").then((m) => {
+    _api = m;
+    return m;
+  });
+  return _apiPromise;
+}
+
+export type StrongRef = ComAtprotoRepoStrongRef.Main;
+export type Facet = AppBskyRichtextFacet.Main;
+export type PostView = AppBskyFeedDefs.PostView;
+
+/**
+ * ⛔ NOT public.api.bsky.app. That AppView host 403s authenticated writes and
+ * even some authenticated reads (searchPosts, verified live). bsky.social is
+ * the entryway every real
+ * Bluesky client talks to; it proxies both the com.atproto.* PDS operations
+ * and the app.bsky.* AppView reads for an authenticated session.
+ */
+const SERVICE_URL = "https://bsky.social";
+
+// A hung connection must not hold a publish request open indefinitely. Applied via a wrapped fetch
+// (below) so it covers session management calls and data calls alike.
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * The cap on any ONE Bluesky response body (a compensating control).
+ *
+ * The nested zod advisory (GHSA-mrhx-c7xc-m3w5) has no in-range fix: the
+ * @atproto chain pins zod 3.x and the fix is only in 4.6.6, so the advisory
+ * is accepted with this bound in place. What it names is memory
+ * exhaustion from a crafted response, and this wrapper only ever dials the
+ * hard-coded bsky.social AppView (SERVICE_URL above), so a byte cap on what a
+ * response may hold in memory bounds exactly that vector.
+ *
+ * Sized generously off the largest payload the callers legitimately read: a
+ * 100-post searchPosts or 25-URI getPosts page is a few hundred KB of JSON,
+ * so 5 MiB is an order of magnitude of headroom while still a bound. Enforced
+ * by readCappedBody, which refuses before the first byte when a declared
+ * Content-Length is over the cap and mid-stream otherwise, never truncating.
+ */
+const RESPONSE_CAP_BYTES = 5 * 1024 * 1024;
+
+export class BlueskyError extends Error {
+  constructor(
+    public status: number,
+    public body: string,
+    method: string,
+    path: string,
+    /** Raw `Retry-After`, verbatim. retry.ts owns the grammar; see RetryAfterCarrier. */
+    public retryAfter: string | null = null,
+  ) {
+    super(`Bluesky ${method} ${path} -> ${status}: ${body.slice(0, 500)}`);
+  }
+}
+
+/**
+ * Every call through the XRPC client (session management included) already
+ * wraps its cause in an XRPCError by the time it reaches us — including a
+ * fetch-level timeout, which surfaces as XRPCError with an Unknown status and
+ * the abort's message rather than as a raw DOMException. So this one branch
+ * covers network failures, timeouts and real vendor error responses alike.
+ */
+function wrapError(err: unknown, method: string, path: string): BlueskyError {
+  // `_api` is populated by the time any XRPCError can exist: every call that
+  // can produce one first awaited getAgent(), which awaited atproto(). A null
+  // here therefore means a non-vendor error, which the fallback below covers.
+  if (_api && err instanceof _api.XRPCError) {
+    return new BlueskyError(
+      Number(err.status),
+      `${err.error ?? "Error"}: ${err.message ?? ""}`,
+      method,
+      path,
+      // XRPCError keeps the response headers as a lowercased map (HeadersMap),
+      // so this is the ONE client that can recover Retry-After without the
+      // Response object — and the one place it would otherwise be dropped,
+      // because everything above this line sees a BlueskyError only.
+      err.headers?.["retry-after"] ?? null,
+    );
+  }
+  return new BlueskyError(0, getErrorMessage(err), method, path);
+}
+
+/** The XRPC error names @atproto/api itself treats as a dead refresh token. */
+const DEAD_REFRESH_ERRORS = new Set(["ExpiredToken", "InvalidToken", "InvalidDID"]);
+
+/**
+ * Whether a failed resume means the stored session is dead, by @atproto/api's
+ * own rule (CredentialSession's refresh: a 401, or one of the names above).
+ * Anything else XRPC raises (a 5xx, a rate limit, a timeout or dropped
+ * connection, which XRPC reports as status 1) says nothing about the token. A
+ * non-XRPC rejection is the library refusing the session itself (a DID
+ * mismatch), so it counts as dead.
+ */
+function isRefusedRefresh(err: unknown, xrpcError: AtprotoApi["XRPCError"]): boolean {
+  if (!(err instanceof xrpcError)) return true;
+  return err.status === 401 || DEAD_REFRESH_ERRORS.has(err.error);
+}
+
+/**
+ * The fetch every Bluesky network call goes through: timeboxed on the request,
+ * byte-capped on the response. The cap refuses oversize by throwing a plain
+ * Error, the same failure shape the timebox's abort arrives as; @atproto's
+ * XRPC client wraps either in an XRPCError of Unknown status (1), which
+ * wrapError maps to the BlueskyError every caller sees.
+ */
+function timeboxedFetch(): typeof fetch {
+  return async (input, init) => {
+    const res = await globalThis.fetch(input, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const capped = await readCappedBody(res, RESPONSE_CAP_BYTES);
+    if (!capped.ok) {
+      throw new Error(`bluesky: response body exceeds the fetch byte cap (${RESPONSE_CAP_BYTES} bytes)`);
+    }
+    // readCappedBody refuses rather than truncates, so on ok these bytes ARE
+    // the whole body, and the drained stream can be replaced by them. A
+    // body-less response (a 204) is handed back untouched: the Response
+    // constructor refuses a body on a null-body status.
+    if (!res.body) return res;
+    return new Response(capped.bytes, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: res.headers,
+    });
+  };
+}
+
+export interface BlueskyCredentials {
+  identifier: string;
+  password: string;
+}
+export type BlueskyCredentialsResolver = () => Promise<BlueskyCredentials>;
+
+let _resolver: BlueskyCredentialsResolver | null = null;
+let _agent: Agent | null = null;
+let _loginPromise: Promise<Agent> | null = null;
+
+/**
+ * Register (or clear, with null) the resolver that supplies the app password.
+ *
+ * INJECTED rather than imported, like every credential resolver here: this
+ * folder is the portable engine and cannot reach the app's secret store
+ * itself. Clearing also drops the cached session: a credential rotation must not leave the process
+ * serving requests on a session built from the password that just got
+ * replaced.
+ */
+export function setBlueskyCredentialsResolver(resolver: BlueskyCredentialsResolver | null): void {
+  _resolver = resolver;
+  _agent = null;
+  _loginPromise = null;
+}
+
+/**
+ * Somewhere durable to keep the session between processes.
+ *
+ * ⛔ WITHOUT THIS, BLUESKY LOCKS THE ACCOUNT OUT AFTER TEN PAGE LOADS.
+ * `com.atproto.server.createSession` is rate-limited at **10 per 24 hours per
+ * account** (`RateLimit-Policy: 10;w=86400`, read off a live response): a
+ * daily budget, not a burst window. The in-process `_agent` cache below only
+ * helps within ONE worker, and a deployment with several processes and
+ * restarts can spend the whole day's allowance on cold starts alone. A status
+ * endpoint that calls connectStatus() live on every load would spend a login
+ * per page view and drive the account into `429 RateLimitExceeded`.
+ *
+ * Resuming a stored session costs a `refreshSession` instead, which is a
+ * different and far more generous limit, and the refresh token is good for
+ * months. So logins go from per-page-load to roughly per-credential-rotation.
+ *
+ * Injected, not imported: this folder is the portable engine and cannot reach
+ * the app's database or encryption keys. A deployment that wires nothing
+ * still works: it just logs in every cold start.
+ */
+export type BlueskySessionStore = {
+  load: () => Promise<AtpSessionData | null>;
+  save: (session: AtpSessionData | null) => Promise<void>;
+};
+
+let _sessionStore: BlueskySessionStore | null = null;
+
+export function setBlueskySessionStore(store: BlueskySessionStore | null): void {
+  _sessionStore = store;
+  _agent = null;
+  _loginPromise = null;
+}
+
+/**
+ * The authenticated agent, opened on first use and cached for the process.
+ *
+ * ⛔ createSession is rate-limited per account, and a scheduled publish job
+ * can fire many times a day across several processes. Opening a session on
+ * every tick (including the overwhelming majority that find nothing due)
+ * would burn that budget for no reason. Every exported function
+ * below only calls this when it has real work to do.
+ *
+ * @atproto/api refreshes the access token from the refresh token on its own
+ * (CredentialSession's fetchHandler); nothing here re-implements that.
+ *
+ * Single-flighted so concurrent callers on a cold process share one login
+ * rather than each opening their own session.
+ */
+async function getAgent(): Promise<Agent> {
+  if (_agent) return _agent;
+  if (_loginPromise) return _loginPromise;
+
+  _loginPromise = (async () => {
+    const { Agent, CredentialSession, XRPCError } = await atproto();
+    if (!_resolver) {
+      throw new BlueskyError(
+        0,
+        "no Bluesky credentials resolver registered (call setBlueskyCredentialsResolver)",
+        "POST",
+        "com.atproto.server.createSession",
+      );
+    }
+    const raw = await _resolver();
+    // Normalise HERE, not only in whichever app wired the resolver. Every
+    // consumer of this engine reaches Bluesky through getAgent(), including the
+    // live proof test which reads process.env directly, so this is the one
+    // place that covers all of them.
+    const creds = { ...raw, identifier: normalizeBlueskyIdentifier(raw.identifier ?? "") };
+    if (!creds.identifier || !creds.password) {
+      throw new BlueskyError(
+        0,
+        "Bluesky credentials resolver returned an empty identifier or password",
+        "POST",
+        "com.atproto.server.createSession",
+      );
+    }
+    // persistSession fires on every token rotation, not just at login, so the
+    // stored copy stays current without anyone calling save() by hand.
+    // `expired` clears it: a dead refresh token must not be retried forever,
+    // and a null store is what tells the next cold start to log in properly.
+    // ⛔ `network-error` leaves it alone: @atproto/api fires it when a refresh
+    // failed for a reason that says nothing about the token (a timeout, a PDS
+    // 5xx) and keeps the session itself, so clearing the shared row there
+    // would send every process that saw the blip to createSession.
+    // Never allowed to reject — a storage hiccup must not fail a publish that
+    // is otherwise fine.
+    const session = new CredentialSession(new URL(SERVICE_URL), timeboxedFetch(), (evt, data) => {
+      if (!_sessionStore || evt === "network-error") return;
+      const next = evt === "create" || evt === "update" ? (data ?? null) : null;
+      // ⛔ `.then(() => save(...))`, NOT `Promise.resolve(save(...))`. The latter
+      // CALLS save() before Promise.resolve exists to wrap it, so a store that
+      // throws SYNCHRONOUSLY escapes the .catch below entirely and rejects
+      // straight into @atproto/api's token-refresh path, which is exactly what
+      // the comment above says must never happen. An async store cannot do
+      // this; a plain function that throws can.
+      void Promise.resolve()
+        .then(() => _sessionStore!.save(next))
+        .catch((err) => {
+          console.warn("[bluesky] could not persist session:", err);
+        });
+    });
+
+    // ── Resume before logging in ────────────────────────────────────────────
+    // The whole point of the store: a resume spends a refreshSession, a login
+    // spends one of only TEN createSession calls per day.
+    let saved = _sessionStore
+      ? await _sessionStore.load().catch((err) => {
+          console.warn("[bluesky] could not read stored session:", err);
+          return null;
+        })
+      : null;
+
+    // ⛔ The store is one shared row, and nothing ties it to the credential.
+    // After the operator switches the Bluesky credential to another account,
+    // resuming the old row would publish as the OLD account. A session is
+    // resumed only when its handle, email or did is the configured identifier;
+    // otherwise it is dropped (same ordering rule as below) and we log in.
+    if (saved && !sessionBelongsTo(saved, creds.identifier)) {
+      console.warn("[bluesky] the stored session belongs to another account; dropping it and logging in");
+      saved = null;
+      await Promise.resolve()
+        .then(() => _sessionStore?.save(null))
+        .catch(() => {});
+    }
+
+    if (saved) {
+      try {
+        await session.resumeSession(saved);
+      } catch (err) {
+        // ⛔ ONLY A REFUSED REFRESH TOKEN ENDS THE STORED SESSION. Dropping the
+        // shared row on any rejection would send several processes to
+        // createSession (10 per day) on a PDS blip and leave Bluesky answering
+        // 429 for the rest of the day. A failure that says
+        // nothing about the token is thrown instead: the stored session stays,
+        // and the next call resumes it again.
+        // ⛔ As a plain Error, the one exception to the BlueskyError-only rule
+        // below. This runs before any create, so nothing was posted; a
+        // BlueskyError(5xx) reads as "outcome unknown" to retry.ts and would make
+        // publish-due fail the leg for good instead of leaving it pending.
+        if (!isRefusedRefresh(err, XRPCError)) {
+          const { message } = wrapError(err, "POST", "com.atproto.server.refreshSession");
+          throw new Error(`${message} (no request was sent; the stored session is kept)`);
+        }
+        // A refused refresh is a session whose access token we cannot trust,
+        // so drop it and fall through to login. Checking `session.session` and
+        // using it anyway would trade a clean login for an unauthenticated
+        // request later.
+        // ⛔ Same ordering rule as the persistSession callback above: a store
+        // that throws synchronously would otherwise escape this .catch and
+        // reject _loginPromise with a RAW Error, breaking this file's contract
+        // that everything above it sees a BlueskyError (bar the refresh
+        // failure just above, which is deliberate).
+        await Promise.resolve()
+          .then(() => _sessionStore?.save(null))
+          .catch(() => {});
+      }
+    }
+
+    if (!session.hasSession) {
+      try {
+        await session.login({ identifier: creds.identifier, password: creds.password });
+      } catch (err) {
+        throw wrapError(err, "POST", "com.atproto.server.createSession");
+      }
+    }
+
+    const agent = new Agent(session);
+    _agent = agent;
+    return agent;
+  })();
+
+  try {
+    return await _loginPromise;
+  } finally {
+    _loginPromise = null;
+  }
+}
+
+/**
+ * Whether a stored session is the configured account's. The identifier is a
+ * handle or an email (createSession's two forms) or a did; handles and emails
+ * compare case-insensitively.
+ */
+function sessionBelongsTo(saved: AtpSessionData, identifier: string): boolean {
+  const want = identifier.toLowerCase();
+  return [saved.handle, saved.email, saved.did].some((v) => v?.toLowerCase() === want);
+}
+
+export interface RichTextResult {
+  text: string;
+  facets?: Facet[];
+}
+
+/**
+ * Detects links, mentions and hashtags the way the real Bluesky app does.
+ *
+ * Without this, a link in the post body is inert text: Bluesky does not
+ * autolink, it renders exactly the facets a client attaches. This is the one
+ * place in the engine that produces a real one (platform-reference.md:412).
+ */
+export async function buildRichText(text: string): Promise<RichTextResult> {
+  const agent = await getAgent();
+  const { RichText } = await atproto();
+  const rt = new RichText({ text });
+  try {
+    await rt.detectFacets(agent);
+  } catch (err) {
+    throw wrapError(err, "GET", "app.bsky.richtext.detectFacets");
+  }
+  return { text: rt.text, facets: rt.facets };
+}
+
+/**
+ * Strip a leading "@" (and surrounding whitespace) from a Bluesky identifier.
+ *
+ * ⛔ NOT COSMETIC. `com.atproto.server.createSession` accepts EITHER a handle or
+ * an email and decides which by looking for an "@". A handle written the way it
+ * appears everywhere a human sees it ("@example.com") is therefore parsed
+ * as an email whose local part is empty, and login fails with:
+ *
+ *   400 InvalidEmail: Invalid email address: Address local part cannot be empty
+ *
+ * The error names EMAIL validation for a credential the operator entered as a
+ * HANDLE, so it reads as a dead account rather than one stray character.
+ *
+ * Calling createSession with the stripped value authenticates as the handle
+ * (`example.com`).
+ *
+ * ⚠️ Lives in the ENGINE, not in the app's credential resolver, because there
+ * can be two independent readers of that secret: the publish path (the app's
+ * resolver -> getAgent) and any caller that POSTs createSession itself. Both
+ * must normalize.
+ * A leading "@" is valid in neither accepted form — handles do not carry one,
+ * and no email may begin with one — so stripping it unconditionally discards
+ * nothing legitimate.
+ */
+export function normalizeBlueskyIdentifier(raw: string): string {
+  return raw.trim().replace(/^@+/, "");
+}
+
+export interface PostImage {
+  blob: BlobRef;
+  alt: string;
+}
+
+export interface CreatePostInput {
+  text: string;
+  facets?: Facet[];
+  images?: PostImage[];
+  /**
+   * `langs` on the record: BCP-47, at most 3 (lexicon `maxLength: 3`). Sent
+   * only when given; an absent field means "unknown", which language-scoped
+   * feeds skip.
+   */
+  langs?: string[];
+}
+
+export interface CreateReplyInput extends CreatePostInput {
+  root: StrongRef;
+  parent: StrongRef;
+}
+
+function buildEmbed(
+  images: PostImage[] | undefined,
+): { $type: "app.bsky.embed.images"; images: Array<{ image: BlobRef; alt: string }> } | undefined {
+  if (!images?.length) return undefined;
+  return {
+    $type: "app.bsky.embed.images",
+    images: images.map((i) => ({ image: i.blob, alt: i.alt })),
+  };
+}
+
+async function post(
+  input: CreatePostInput & { reply?: { root: StrongRef; parent: StrongRef } },
+): Promise<StrongRef> {
+  const agent = await getAgent();
+  try {
+    return await agent.post({
+      text: input.text,
+      facets: input.facets,
+      embed: buildEmbed(input.images),
+      reply: input.reply,
+      ...(input.langs?.length ? { langs: input.langs.slice(0, 3) } : {}),
+    });
+  } catch (err) {
+    throw wrapError(err, "POST", "com.atproto.repo.createRecord#app.bsky.feed.post");
+  }
+}
+
+/** A root post. `uri`/`cid` are both needed: a reply references both. */
+export async function createPost(input: CreatePostInput): Promise<StrongRef> {
+  return post(input);
+}
+
+/** A reply. `root` and `parent` are independent StrongRefs — see ReplyRef. */
+export async function createReply(input: CreateReplyInput): Promise<StrongRef> {
+  const { root, parent, ...rest } = input;
+  return post({ ...rest, reply: { root, parent } });
+}
+
+/** GET app.bsky.feed.getPosts — one call, no internal chunking (vendor caps at 25 URIs; callers chunk). */
+export async function getPosts(uris: string[]): Promise<PostView[]> {
+  if (!uris.length) return [];
+  const agent = await getAgent();
+  try {
+    const res = await agent.getPosts({ uris });
+    return res.data.posts;
+  } catch (err) {
+    throw wrapError(err, "GET", "app.bsky.feed.getPosts");
+  }
+}
+
+/**
+ * GET app.bsky.feed.searchPosts — social listening's post search.
+ *
+ * ⛔ THIS EXISTS TO STOP A SECOND LOGIN PATH. A listening caller that POSTs
+ * com.atproto.server.createSession itself and then calls searchPosts with the
+ * raw token spends from the SAME budget of only TEN createSession calls per
+ * 24h that publishing spends: one login per bluesky-enabled listening rule,
+ * per sweep, with no session store behind it, which ends in a 429.
+ *
+ * Routing it through getAgent() means both paths share one session, one
+ * resume-before-login, and one persisted store.
+ *
+ * ⚠️ Must stay on bsky.social (SERVICE_URL). `public.api.bsky.app` answers 403
+ * to searchPosts even with a valid session token (verified live against both
+ * hosts), so the "public" appview is not an interchangeable substitute.
+ */
+export async function searchPosts(query: string, limit = 20): Promise<PostView[]> {
+  const agent = await getAgent();
+  try {
+    // The vendor caps `limit` at 100; clamped here rather than at the caller so
+    // every consumer gets the same bound.
+    const res = await agent.app.bsky.feed.searchPosts({ q: query, limit: Math.min(limit, 100) });
+    return res.data.posts;
+  } catch (err) {
+    throw wrapError(err, "GET", "app.bsky.feed.searchPosts");
+  }
+}
+
+/**
+ * com.atproto.repo.deleteRecord. Per the lexicon's own description this is
+ * "delete a record, or ensure it doesn't exist" — idempotent by spec. This
+ * function stays a thin passthrough that throws on a genuine failure; the
+ * "already gone is success" business decision belongs to the transport (see
+ * bluesky-transport.ts), which is what the DirectTransport contract requires.
+ */
+export async function deleteRecord(uri: string): Promise<void> {
+  const agent = await getAgent();
+  try {
+    await agent.deletePost(uri);
+  } catch (err) {
+    throw wrapError(err, "POST", "com.atproto.repo.deleteRecord");
+  }
+}
+
+export async function uploadBlob(data: Uint8Array, mimeType: string): Promise<BlobRef> {
+  const agent = await getAgent();
+  try {
+    const res = await agent.uploadBlob(data, { encoding: mimeType });
+    return res.data.blob;
+  } catch (err) {
+    throw wrapError(err, "POST", "com.atproto.repo.uploadBlob");
+  }
+}
+
+export interface BlueskyProfile {
+  did: string;
+  handle: string;
+  displayName?: string;
+  /**
+   * Counts from `app.bsky.actor.getProfile`'s ProfileViewDetailed. Optional
+   * because the lexicon marks them optional — a profile the appview has not
+   * finished aggregating can omit them, and a missing count must read as
+   * "unknown" rather than silently becoming a real zero on a dashboard.
+   */
+  followersCount?: number;
+  followsCount?: number;
+  postsCount?: number;
+}
+
+/** app.bsky.actor.getProfile. Omit `actor` for the authenticated account's own profile. */
+export async function getProfile(actor?: string): Promise<BlueskyProfile> {
+  const agent = await getAgent();
+  const who = actor ?? agent.did;
+  if (!who) {
+    throw new BlueskyError(
+      0,
+      "no actor given and the session has no did (login did not complete)",
+      "GET",
+      "app.bsky.actor.getProfile",
+    );
+  }
+  try {
+    const res = await agent.getProfile({ actor: who });
+    return {
+      did: res.data.did,
+      handle: res.data.handle,
+      displayName: res.data.displayName,
+      followersCount: res.data.followersCount,
+      followsCount: res.data.followsCount,
+      postsCount: res.data.postsCount,
+    };
+  } catch (err) {
+    throw wrapError(err, "GET", "app.bsky.actor.getProfile");
+  }
+}
+
+/** How many of the newest records one crash-check read asks for. */
+const RECENT_RECORDS_LIMIT = 25;
+
+/**
+ * `com.atproto.repo.listRecords` on the account's own `app.bsky.feed.post`
+ * collection, newest first (the repo's TID record keys sort by time), for the
+ * agent publish's crash check. A reply is kept with no text: it never matches
+ * a root, but it still counts toward proving how far back the read reached.
+ */
+export async function listRecentPosts(): Promise<RecentPostsPage> {
+  const agent = await getAgent();
+  const repo = agent.did;
+  if (!repo) {
+    throw new BlueskyError(0, "the session has no did (login did not complete)", "GET", "com.atproto.repo.listRecords");
+  }
+  try {
+    const res = await agent.com.atproto.repo.listRecords({
+      repo,
+      collection: "app.bsky.feed.post",
+      limit: RECENT_RECORDS_LIMIT,
+    });
+    const posts = res.data.records.map((r) => {
+      const value = r.value as { text?: unknown; createdAt?: unknown; reply?: unknown };
+      const createdAt = typeof value.createdAt === "string" ? new Date(value.createdAt) : null;
+      return {
+        id: r.uri,
+        texts: !value.reply && typeof value.text === "string" ? [value.text] : [],
+        createdAt: createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : null,
+      };
+    });
+    return { posts, more: Boolean(res.data.cursor) };
+  } catch (err) {
+    throw wrapError(err, "GET", "com.atproto.repo.listRecords");
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "approvalMode": "draft",
+  "timezone": "America/Toronto",
+  "api": {
+    "baseUrl": "https://social.example.com",
+    "audience": "https://social.example.com/api/internal/social"
+  },
+  "defaults": {
+    "platforms": ["instagram", "facebook", "threads", "twitter", "linkedin", "bluesky"],
+    "youtubeVisibility": "public",
+    "youtubeCategoryId": "28"
+  }
+}

@@ -1,0 +1,28 @@
+# gitleaks configuration, read from the repository root by `gitleaks git .`
+# (.github/workflows/gitleaks.yml).
+#
+# The default ruleset, plus one allowlist for a known false positive. The linkedin-client-id
+# and linkedin-client-secret rules match a barrel re-export line in src/index.ts that names a
+# linkedIn* function, and take the NEXT line's function name as the "secret". These lines carry
+# no value. The allowlist is narrowed two ways, so a real credential is still reported:
+#   - one path (src/index.ts) AND one of the two LinkedIn rules;
+#   - each regex is the whole two-line text of one known finding, anchored at both ends, so a
+#     finding that ends on any other line (a real value planted beside these) is not matched.
+#     In gitleaks 8.30.1 the "line" target of a finding in `git` mode is a newline followed by
+#     the full lines the match spans, hence the leading \n.
+# If the exports are reordered, a finding comes back and this list is updated to the new pair.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "src/index.ts barrel re-exports of linkedIn* functions: names, no value"
+condition = "AND"
+targetRules = ["linkedin-client-id", "linkedin-client-secret"]
+paths = ['''^src/index\.ts$''']
+regexTarget = "line"
+regexes = [
+  '''^\n  getComments as linkedInGetComments,\n  getFollowerCount as linkedInGetFollowerCount,$''',
+  '''^\n  getFollowerCount as linkedInGetFollowerCount,\n  getFollowerGains as linkedInGetFollowerGains,$''',
+  '''^\n  parseLinkedInCommentPermalink,\n  replyToComment as linkedInReplyToComment,$''',
+]

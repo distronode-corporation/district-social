@@ -1,0 +1,5 @@
+# Machine-local CLI state, never committed. config.json holds this machine's
+# API origin and audience (config.ts reads it; config.example.json is the
+# tracked template to copy it from).
+config.json
+*.log

@@ -1,0 +1,16 @@
+# district-social publish scope, as read in the host package this engine is developed in: the
+# files that leave that package for this public repository.
+#
+# Paths are relative to the host package's root, not to this repository: the first include is
+# where the engine lives there (it is src/ here), and scripts/social/ is the same path in both.
+# A file is in scope when an include matches it and no exclude does ("**" crosses directories,
+# "*" does not). Everything in scope must pass the host's scrub gate at zero hits, and this
+# repository is seeded from exactly this list.
+
+include src/lib/social-hq/engine/**
+include scripts/social/**
+
+# Brand material: the operator's own marketing, store listings and brand brief, not CLI code.
+exclude scripts/social/campaigns/**
+exclude scripts/social/profiles/**
+exclude scripts/social/brand.md
