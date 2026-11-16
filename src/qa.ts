@@ -251,7 +251,7 @@ export function deterministicChecks(
         platform: p,
         code: "no-route",
         message: `${name} has no way to publish: no direct connection, and no aggregator channel for it`,
-        fix: `Connect ${name} in Social HQ settings, or remove it from this post's targets.`,
+        fix: `Connect ${name}, or remove it from this post's targets.`,
       });
     }
   }
@@ -277,7 +277,7 @@ export function deterministicChecks(
     });
   }
 
-  // BRAND RULE, not a platform rule: Social HQ is a marketing surface, so every
+  // BRAND RULE, not a platform rule: the engine is a marketing surface, so every
   // post is an advertisement and carries a visual. Most platforms would happily
   // accept text, which is precisely why this cannot be expressed as a
   // `requiresMedia` spec flag: setting that on all nine would make the formatter's
@@ -425,7 +425,7 @@ export function deterministicChecks(
         severity: "fail",
         platform: p,
         code: "video-unsupported",
-        message: `${s.displayName} cannot publish video from Social HQ yet, and this version selects one`,
+        message: `${s.displayName} cannot publish video through this engine yet, and this version selects one`,
         fix: `Select an image for ${s.displayName} instead of the video, or drop ${s.displayName} from the targets.`,
       });
     }
@@ -1465,7 +1465,7 @@ const LLM_QA_SCHEMA: Record<string, unknown> = {
 function trackedLinkGuidance(brand: Pick<BrandContext, "linkDomains">): string {
   const [domain] = brand.linkDomains();
   if (!domain) return "";
-  return `Tracked links: Social HQ replaces the source link in each render with that platform's own tracked short link, a URL on our domain whose path is /l/ and a short code (for example https://www.${domain}/l/Ab3xK9q). It redirects to the source link with UTM parameters. A render that carries such a link where the source has its link is correct: never report it as a wrong, broken or mismatched link.`;
+  return `Tracked links: the publisher replaces the source link in each render with that platform's own tracked short link, a URL on our domain whose path is /l/ and a short code (for example https://www.${domain}/l/Ab3xK9q). It redirects to the source link with UTM parameters. A render that carries such a link where the source has its link is correct: never report it as a wrong, broken or mismatched link.`;
 }
 
 /** A tracked short link on one of the brand's domains: `<host>/l/<code>`, scheme optional. */
@@ -1653,7 +1653,7 @@ async function pinterestBoardChecks(draft: Draft): Promise<QAIssue[]> {
         code: "no-pinterest-boards",
         message:
           "the connected Pinterest account has no boards, so a pin has nowhere to go",
-        fix: "Create a board in Pinterest, then set it as the default in Social HQ settings.",
+        fix: "Create a board in Pinterest, then set it as the default board.",
       },
     ];
   }

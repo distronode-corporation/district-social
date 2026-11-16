@@ -13,7 +13,7 @@
  * reply's selfRef once one exists — see that file), and always return
  * `selfRef` from `publishReply` so the chain can be walked forward.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import { PublishPreflightError } from "./publish.js";

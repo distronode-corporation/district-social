@@ -1,8 +1,8 @@
 /**
- * Env-driven settings for the Social HQ engine. Everything here is read
+ * Env-driven settings for the engine. Everything here is read
  * lazily (at call time, never at module load) so the engine has no import-time
  * dependency on process.env or the filesystem — safe to import from anywhere,
- * including Next.js server bundles that may not have secrets wired at boot.
+ * including server bundles that may not have secrets wired at boot.
  *
  * Deployment facts the engine must not guess (the GCP project Veo bills to,
  * the Reddit User-Agent that names the operator's app and account) come from
@@ -105,7 +105,7 @@ function youtubeVisibility(): EngineDefaults["youtubeVisibility"] {
   const match = YOUTUBE_VISIBILITIES.find((v) => v === raw);
   if (raw && !match) {
     console.warn(
-      `[socialhq] SOCIALMETA_YOUTUBE_VISIBILITY="${raw}" is not one of ` +
+      `[district-social] SOCIALMETA_YOUTUBE_VISIBILITY="${raw}" is not one of ` +
         `${YOUTUBE_VISIBILITIES.join("|")}; falling back to "public"`,
     );
   }

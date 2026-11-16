@@ -11,7 +11,7 @@
  * operator-supplied media, where a multi-image
  * carousel can be intentional.
  *
- * Lives in the engine (not social-hq) so formatPost and publishDraft can both
+ * Lives in the engine (not the host application) so formatPost and publishDraft can both
  * enforce it without a layering violation.
  */
 import { SPECS } from "./specs.js";

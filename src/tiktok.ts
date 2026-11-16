@@ -26,7 +26,7 @@
  * and 40100 ("Requests made too frequently") are marked `rateLimited`, which
  * retry.ts treats as safe to repeat even for a create.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import { retryAfterHeader } from "./retry.js";

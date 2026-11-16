@@ -7,7 +7,7 @@
  * no fetch, no auth, no XRPC error shapes — just "what does a post/reply/
  * delete/lookup mean on this platform".
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {

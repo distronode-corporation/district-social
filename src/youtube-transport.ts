@@ -11,7 +11,7 @@
  * just images has nothing this transport can post, and uploading nothing
  * silently would be far worse than refusing. See assertHasVideo below.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {

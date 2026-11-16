@@ -6,9 +6,9 @@ import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch
  * Vertex AI Veo (video generation) client. Text calls go through claude.ts;
  * video is on Vertex.
  *
- * WHY THIS IS RAW `fetch`, NOT `@google/genai` (a website dependency, used
- * elsewhere for Gemini): video generation is a long-running operation (LRO), not a
- * synchronous call, and the @google/genai SDK (v2.11.0, installed here) has
+ * WHY THIS IS RAW `fetch`, NOT `@google/genai` (the usual SDK for
+ * Gemini): video generation is a long-running operation (LRO), not a
+ * synchronous call, and the @google/genai SDK (v2.11.0) has
  * two properties that make it the wrong tool for THIS half of the job:
  *
  *   1. `operations.getVideosOperation()` takes a whole `GenerateVideosOperation`
@@ -32,8 +32,8 @@ import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch
  *      future Veo response includes it under a key the SDK hasn't been taught
  *      yet. A raw client sees the whole JSON body and can defend against that.
  *
- * Auth: this file cannot import the app's Google auth helpers (no `@/`
- * aliases inside the engine), so it goes straight to `google-auth-library`'s
+ * Auth: this file cannot import the app's Google auth helpers (the engine
+ * takes relative imports only), so it goes straight to `google-auth-library`'s
  * `GoogleAuth` (already a direct dependency, and the same library
  * @google/genai itself uses internally for `vertexai: true` clients). No
  * impersonation: Veo calls run as the process's own identity, its
@@ -55,7 +55,7 @@ import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch
  * can never be fetched, and it cannot be identified for cleanup. Persist the
  * returned name BEFORE doing anything else with it.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  *
  * ---
  * VENDOR FACTS: verified against official Google Cloud docs unless marked

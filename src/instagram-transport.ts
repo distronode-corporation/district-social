@@ -32,7 +32,7 @@
  *   - animated GIFs (assertNoGif) — Meta's own image requirements doc states
  *     plainly that "JPEG is the only image format supported."
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {
@@ -308,8 +308,8 @@ interface InstagramImageSource {
  *
  * The JPEG-only rule below is real and verified against Meta directly, and
  * this transport deliberately does not re-encode: `sharp` is
- * a native binary and this folder must stay liftable (no `@/`, no prisma, no
- * next), so the conversion is injected instead. `channelRules().imageFormats`
+ * a native binary and this folder must stay liftable (relative imports
+ * only), so the conversion is injected instead. `channelRules().imageFormats`
  * declares ["image/jpeg"], `fitForTransport` reads that declaration, and the
  * app's injected media fitter (`fitMediaForPublish`) does the transcode and
  * re-uploads the JPEG so `image_url` points at bytes Meta will accept.

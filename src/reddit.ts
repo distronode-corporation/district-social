@@ -20,7 +20,7 @@
  * blogs. Anywhere the official page did not spell something out, the comment
  * says so explicitly rather than asserting it.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import type { Agent as UndiciAgent } from "undici";
@@ -127,7 +127,7 @@ export class RedditApiError extends RedditError {
 }
 
 /**
- * What the operator does next, for the rejections a Social HQ post actually
+ * What the operator does next, for the rejections a post from this engine actually
  * meets. Codes as Reddit returns them in `json.errors` (PRAW's long-standing
  * observation; see submitPost's docblock on what is and is not proven).
  * ⚠️ RATELIMIT is deliberately NOT marked retryable: its wait is minutes
@@ -902,8 +902,8 @@ export async function uploadMediaAsset(
   // bypass. A rejection degrades to the self post that submitPost already falls
   // back to when the (undocumented) upload fails.
   //
-  // Engine rule check: `./ssrf` is the engine's own module (no `@/`, no prisma,
-  // no next), so the folder stays liftable.
+  // Engine rule check: `./ssrf` is the engine's own module (relative imports
+  // only), so the folder stays liftable.
   const { dispatcher, redirect } = await preparePinnedHttpsFetch(endpoint);
 
   const upload = new FormData();

@@ -8,8 +8,8 @@ import type { MediaAsset } from "./types.js";
  * Where an asset's bytes get a public URL, injected rather than imported.
  *
  * Same shape as media-fit.ts's `MediaFitter` and for the same reason: this
- * folder is deliberately portable engine code (relative imports only, no
- * `@/`, no prisma, no next; see index.ts's header), so it cannot reach the
+ * folder is deliberately portable engine code (relative imports only; see
+ * index.ts's header), so it cannot reach the
  * app's media store uploader directly. The app wires an implementation the
  * same way it wires the media fitter and every credential resolver.
  */
@@ -113,7 +113,7 @@ function probeDimensions(abs: string): Partial<MediaAsset> {
  * real limitation, stated rather than papered over.
  *
  * ⚠️ The read is `fs.promises.readFile`, NOT `readFileSync`. This runs on the
- * publish path inside the Next.js server, where a synchronous read of a video
+ * publish path inside a server process, where a synchronous read of a video
  * blocks the whole event loop for every other request on that process for as
  * long as the read takes. The asynchronous read is also what lets the caller
  * upload several independent assets at once instead of one after another.

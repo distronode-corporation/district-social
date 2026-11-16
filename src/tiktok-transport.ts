@@ -24,7 +24,7 @@
  * properties, and none to delete a video post, so deletePost refuses with the
  * one instruction that works: delete it in the TikTok app.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import { getErrorMessage } from "./error-message.js";
@@ -87,7 +87,7 @@ function splitRef(ref: string): { shareId: string; postId: string } {
 let _profileUrl: string | null = null;
 
 /**
- * The account Social HQ publishes to, for a link to a post whose id TikTok had
+ * The account the engine publishes to, for a link to a post whose id TikTok had
  * not issued yet. Injected from the app's profile registry (wired beside the
  * credentials resolver) rather than a second literal: the engine holds no brand's handles.
  *
@@ -208,7 +208,7 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
   if (!scopes.includes(TIKTOK_PUBLISH_SCOPE)) {
     throw new PublishPreflightError(
       `the connected TikTok grant does not include ${TIKTOK_PUBLISH_SCOPE}, so it cannot publish; ` +
-        "reconnect TikTok (Social HQ > Settings > TikTok) and allow posting",
+        "reconnect TikTok and allow posting",
     );
   }
 

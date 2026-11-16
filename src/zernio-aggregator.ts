@@ -6,7 +6,7 @@
  * docblock. Registration alone routes nothing: a platform reaches this only by
  * being set to `aggregator:zernio` in `transportOverrides`.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import type { Aggregator, DirectConnectStatus, DirectPostFacts, DirectPublishInput, DirectPublishResult, TransportChannelRules } from "./transport.js";
@@ -284,7 +284,7 @@ function platformData(
         // The same disclosure Instagram's `is_ai_generated` reads: a Veo clip
         // carries `aiGenerated` on the draft's media.
         videoMadeWithAi: input.media.some(isAiGeneratedAsset),
-        // The operator previewed the render and approved it in Social HQ,
+        // The operator previewed the render and approved it in the host application,
         // which is what these two attest.
         contentPreviewConfirmed: true,
         expressConsentGiven: true,

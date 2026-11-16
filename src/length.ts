@@ -1,7 +1,7 @@
 /**
  * Post-length counting, one implementation for the engine and the composer.
  *
- * ⚠️ NO RUNTIME IMPORTS. The Social HQ composer (client-side) imports this
+ * ⚠️ NO RUNTIME IMPORTS. A host's composer (client-side) imports this
  * file directly, so anything it pulls in ships to the browser. The type-only
  * import below is erased at build.
  *

@@ -5,8 +5,8 @@
  * cap plus at most one arriving network chunk, never the whole body.
  *
  * ⛔ THE BYTE CAP IS A SECURITY PROPERTY OF EVERY READER THAT GOES THROUGH
- * HERE. The three readers this module replaced (the knowledge-base URL import,
- * the business-website read and the MCP client-metadata fetch) each sit behind
+ * HERE. The three readers this module replaced (in the application it was
+ * extracted from) each sit behind
  * an SSRF guard (`preparePinnedHttpsFetch`, address pinning), but the guard
  * says nothing about SIZE: an allowed host can still stream an endless body
  * into memory. Two checks make that impossible:
@@ -24,8 +24,8 @@
  * classes across modules. Only a genuine transport fault mid-read (a reset,
  * the deadline firing) still throws, and each caller already maps that.
  *
- * Dependency-free on purpose: node and web streams only, no next, no prisma.
- * It lives in the Social HQ engine, which imports nothing outside its own
+ * Dependency-free on purpose: node and web streams only.
+ * It lives in the engine, which imports nothing outside its own
  * folder; the app may re-export it so every app caller keeps its import: one
  * implementation, not two copies.
  */

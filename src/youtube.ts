@@ -38,7 +38,7 @@
  * from training data without that check — see the docblocks on insertVideo,
  * getVideos and the module-level constants for the specifics.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import { retryAfterHeader } from "./retry.js";

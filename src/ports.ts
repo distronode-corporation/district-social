@@ -25,7 +25,7 @@
  * grant comes from the application's human surface, which is the only caller of
  * the in-memory gate's `grant`.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import { genJson, type GenJsonOptions } from "./claude.js";

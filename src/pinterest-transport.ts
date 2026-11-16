@@ -13,14 +13,14 @@
  * succeeds, returns a real id, reports analytics, and goes NOWHERE when
  * clicked — which is most of the point of a pin. The same applies to the
  * board: `render.board` only holds a board the operator picked explicitly, so
- * the Social HQ default (`defaultPinterestBoard`) arrives via `destination`
+ * the host's default (`defaultPinterestBoard`) arrives via `destination`
  * too, and reading the render alone would refuse publishes the aggregator
  * path accepted.
  *
  * Both are now read from `destination` first. If a later change makes that
  * field optional, this is what breaks and it breaks silently.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {
@@ -200,7 +200,7 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
   const { render, media, destination } = input;
 
   // `destination` first, `render.board` second. The render only ever carries a
-  // board the operator picked EXPLICITLY on the draft; the Social HQ default
+  // board the operator picked EXPLICITLY on the draft; the host's default
   // (settings "defaultPinterestBoard") lives on destination, so reading the
   // render alone silently ignores the default and refuses a publish that the
   // aggregator path would have accepted.

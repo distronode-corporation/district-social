@@ -7,7 +7,7 @@
  * brand through every call. The brand state lives in the instance and nowhere
  * else: two engines never share a pack, and `setBrandPack` changes only its own.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {

@@ -15,8 +15,8 @@
  * platform's real limits, which is why it is a required method.
  *
  * ⚠️ The re-encoder itself is INJECTED rather than imported. `sharp` is a
- * native binary and this folder must stay liftable (relative imports only, no
- * `@/`, no prisma, no next), so the app wires an implementation in the same way
+ * native binary and this folder must stay liftable (relative imports only),
+ * so the app wires an implementation in the same way
  * it wires the Postiz key and every credential resolver. With no fitter
  * registered — the CLI, most tests — assets pass through UNCHANGED, which keeps
  * the old behaviour rather than inventing a new failure.

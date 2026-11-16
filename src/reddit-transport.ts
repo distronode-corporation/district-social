@@ -25,7 +25,7 @@
  *      so the link travels in the body where the formatter put it, and the
  *      link-post branch below is reserved for a render with no copy at all.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {
@@ -165,7 +165,7 @@ async function tryUploadFirstImage(media: MediaAsset[]): Promise<string | null> 
  * attaches the generated card to EVERY platform's render including Reddit, so
  * refusing on media would fail nearly every Reddit publish while looking like a
  * per-draft problem. A self post is also the better Reddit post: the copy and its
- * clickable link are the payload, the card is a Social HQ artifact. Loud, because
+ * clickable link are the payload, the card is the host's own artifact. Loud, because
  * dropped content is never silent here, and the drop is recoverable by hand.
  *
  * Media is dropped when the render has copy (an image post has no body field, so

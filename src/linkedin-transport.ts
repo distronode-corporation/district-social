@@ -4,7 +4,7 @@
  * header). Everything platform-specific to how LinkedIn models a post lives
  * here; everything about *talking* to LinkedIn lives in linkedin.ts.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import {

@@ -10,7 +10,7 @@ import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch
  * envelope, the same token-in-query convention, the same `appsecret_proof`
  * requirement. The per-platform behaviour lives in the transports.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next. The
+ * Engine rules apply: relative imports only. The
  * app injects credentials through `setMetaCredentialsResolver`, the same shape
  * as `setPinterestTokenResolver`.
  *
@@ -55,7 +55,7 @@ let _resolver: MetaCredentialsResolver | null = null;
 
 /**
  * Injected by the app layer, because this folder cannot read the secret store
- * (no `@/` aliases). Identical reasoning to setPinterestTokenResolver.
+ * (relative imports only). Identical reasoning to setPinterestTokenResolver.
  */
 export function setMetaCredentialsResolver(resolver: MetaCredentialsResolver | null): void {
   _resolver = resolver;

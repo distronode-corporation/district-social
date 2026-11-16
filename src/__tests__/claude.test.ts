@@ -143,7 +143,7 @@ describe("socialClaude", () => {
     ]);
     expect(info).toHaveBeenCalledTimes(1);
     expect(info).toHaveBeenCalledWith(
-      "[socialhq] Claude auth: workload identity federation (rule fdrl_01TestRuleSocialHq, gce-metadata).",
+      "[district-social] Claude auth: workload identity federation (rule fdrl_01TestRuleSocialHq, gce-metadata).",
     );
     info.mockRestore();
   });
@@ -155,7 +155,7 @@ describe("socialClaude", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     await claude.socialClaude();
     expect(info).toHaveBeenCalledWith(
-      "[socialhq] Claude auth: workload identity federation (rule fdrl_01TestRuleSocialHq, " +
+      "[district-social] Claude auth: workload identity federation (rule fdrl_01TestRuleSocialHq, " +
         "file /var/run/secrets/anthropic/token); ANTHROPIC_API_KEY is set and NOT used.",
     );
     expect(h.getSecret).not.toHaveBeenCalled();

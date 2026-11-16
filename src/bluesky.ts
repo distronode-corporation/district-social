@@ -13,7 +13,7 @@
  *     is dead text (scripts/social/platform-reference.md), so
  *     buildRichText is the one place a real facet gets attached.
  *
- * Engine rules apply: relative imports only, no `@/`, no prisma, no next.
+ * Engine rules apply: relative imports only.
  */
 
 import type {
@@ -34,8 +34,8 @@ import { readCappedBody } from "./read-capped.js";
  * ⛔ `@atproto/api` IS LOADED LAZILY, NEVER AS A STATIC VALUE IMPORT.
  *
  * Its dependency `multiformats` publishes `./cid` with an `import` condition
- * only. A static `import { Agent } from "@atproto/api"` is fine under Next and
- * vitest (both bundle ESM), but the Social HQ CLI runs through tsx in a
+ * only. A static `import { Agent } from "@atproto/api"` is fine under a bundler
+ * or vitest (both bundle ESM), but the CLI runs through tsx in a
  * CommonJS package, and tsx's CJS resolver then fails at module load with
  * `ERR_PACKAGE_PATH_NOT_EXPORTED: ./cid` before a single command runs, on a
  * clean install too (so not a stale node_modules).

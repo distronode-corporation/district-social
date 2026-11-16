@@ -38,7 +38,7 @@ const BY_IDENTIFIER: ReadonlyMap<string, Platform> = new Map(
 /**
  * Our platform id for a Postiz identifier, or undefined when we do not model it.
  *
- * Undefined is a real answer, not an error: Postiz can hold channels Social HQ
+ * Undefined is a real answer, not an error: Postiz can hold channels the engine
  * deliberately does not publish to (a Google Business Profile, for instance).
  */
 export function platformForIdentifier(identifier: string): Platform | undefined {

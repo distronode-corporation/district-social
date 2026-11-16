@@ -1,11 +1,10 @@
 /**
- * Social HQ engine: public surface.
+ * district-social engine: public surface.
  *
  * Self-contained social post formatter/QA/publisher (one direct vendor API per
- * platform, Vertex Gemini for drafting). Only relative imports within this folder; no `@/`
- * aliases, no prisma/next imports, so this folder can be lifted as-is into
- * any consumer that can see the website's Docker build context (the
- * Social HQ CLI, or a future hosted admin UI).
+ * platform, Claude for text). Only relative imports within this folder, and no
+ * framework or database imports, so this folder can be lifted as-is into any
+ * consumer (the CLI, or a hosted admin UI).
  *
  * `renderDraft`/`renderQa` (terminal-formatted previews) intentionally stay
  * CLI-side (scripts/social/render.ts) — a hosted UI renders its own views.

@@ -1,6 +1,6 @@
 /**
- * Every platform Social HQ can publish to. This is a PUBLISHING surface, not
- * a website's profile list: adding a platform here never advertises an
+ * Every platform the engine can publish to. This is a PUBLISHING surface, not
+ * a list of public profiles: adding a platform here never advertises an
  * account anywhere.
  *
  * TikTok publishes directly through the operator's TikTok API for Business

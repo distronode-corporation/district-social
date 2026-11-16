@@ -22,7 +22,7 @@
  * DNS resolution is skipped under NODE_ENV==="test" to avoid network flakiness;
  * the synchronous literal-IP and hostname checks always run.
  *
- * Lives in the Social HQ engine, which imports nothing outside its own folder;
+ * Lives in the engine, which imports nothing outside its own folder;
  * the app may re-export it, so every app caller keeps its import and there is
  * one implementation, not two copies.
  */
@@ -165,7 +165,7 @@ function isPrivateOrReserved(host: string): boolean {
 
 /**
  * The same private/reserved classification the guards below apply, for a caller
- * that resolves and fetches on its own terms (the setup wizard's website read,
+ * that resolves and fetches on its own terms (a read of a user-supplied site,
  * which must allow plain http and follow a bounded number of redirects, each one
  * re-validated). `addr` is an IP literal, v4 or v6, brackets allowed; anything
  * that parses as neither is treated as private (fail closed).
