@@ -1,0 +1,97 @@
+name: CI
+
+# The gate every change to main passes, and the gate release.yml runs again on a tagged
+# commit (it calls this file as a reusable workflow, so the two cannot drift):
+#   lint        eslint with typescript-eslint's type-checked strict rules.
+#   typecheck   tsc --noEmit over the sources, the tests and the vitest config.
+#   test        vitest with coverage, whose thresholds in vitest.config.ts fail the job below
+#               100 percent per file.
+# The Node version is the one in .nvmrc.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      no_cache:
+        description: >-
+          Install with no npm cache. release.yml sets it: a tag run could restore a cache
+          written by any main-branch run, and a restored cache is build input nobody
+          reviewed in that run.
+        type: boolean
+        default: false
+
+# Nothing at the top level; each job asks for what it needs, and nothing here writes.
+permissions: {}
+
+# Only pull requests cancel in flight: a superseded pull request run is waste, a
+# superseded main run is history.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: ${{ !inputs.no_cache && 'npm' || '' }}
+          package-manager-cache: ${{ !inputs.no_cache }}
+      - run: npm ci
+      - run: npm run lint
+
+  typecheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: ${{ !inputs.no_cache && 'npm' || '' }}
+          package-manager-cache: ${{ !inputs.no_cache }}
+      - run: npm ci
+      - run: npm run typecheck
+      # The package release.yml publishes is this build; it must compile too.
+      - run: npm run build
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the code
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: ${{ !inputs.no_cache && 'npm' || '' }}
+          package-manager-cache: ${{ !inputs.no_cache }}
+      - run: npm ci
+      # `npm test` is `vitest run --coverage --passWithNoTests`: the thresholds are enforced,
+      # and an empty suite passes only while src/ has nothing to cover.
+      - run: npm test

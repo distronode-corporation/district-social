@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+# vitest writes local reports here (the json reporter without --outputFile).
+.vitest/
+*.tsbuildinfo
+.eslintcache
+*.tgz
+.DS_Store

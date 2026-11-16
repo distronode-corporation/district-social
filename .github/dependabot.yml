@@ -1,0 +1,48 @@
+version: 2
+
+# Two ecosystems, because this repository has two kinds of pin that age independently: the
+# npm lockfile and the action SHAs. Every `uses:` in .github/workflows is pinned to a full
+# commit SHA with a `# vX.Y.Z` comment, which is right for supply-chain safety and wrong for
+# noticing a security fix: a pinned SHA never moves on its own. The `github-actions` entry
+# turns each pin into a pull request, rewriting both the SHA and the version comment.
+#
+# `cooldown` holds a version update back until the release is a week old, so a compromised
+# publish that is yanked within days never reaches a pull request here. It matches the
+# 7-day rule in CONTRIBUTING.md. It does not delay SECURITY updates, which Dependabot opens
+# as soon as an advisory lands.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      # One pull request for the routine bumps. A major usually needs a workflow edit, so
+      # it is left on its own.
+      actions-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    # Exact pins stay exact: Dependabot rewrites "1.2.3" to "1.2.4", never to a range.
+    versioning-strategy: increase
+    ignore:
+      # typescript-eslint supports TypeScript below 6.1 (its peer range), so TypeScript moves
+      # to a new minor or major by hand, together with typescript-eslint.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+    groups:
+      # Split by dependency type so that a group's type is unambiguous. None of these groups
+      # sets `applies-to`, so each covers version updates only; a security update arrives as
+      # its own pull request, outside the cooldown.
+      npm-dev-minor:
+        dependency-type: development
+        update-types: [minor, patch]
+      npm-prod-minor:
+        dependency-type: production
+        update-types: [minor, patch]
