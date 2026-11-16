@@ -318,7 +318,10 @@ async function getAgent(): Promise<Agent> {
     // resuming the old row would publish as the OLD account. A session is
     // resumed only when its handle, email or did is the configured identifier;
     // otherwise it is dropped (same ordering rule as below) and we log in.
-    if (saved && !sessionBelongsTo(saved, creds.identifier)) {
+    // An email identifier against a stored session with NO email is unproven,
+    // not another account: it is resumed and checked below.
+    const owner = saved ? sessionOwner(saved, creds.identifier) : "mine";
+    if (saved && owner === "other") {
       console.warn("[bluesky] the stored session belongs to another account; dropping it and logging in");
       saved = null;
       await Promise.resolve()
@@ -326,9 +329,11 @@ async function getAgent(): Promise<Agent> {
         .catch(() => {});
     }
 
+    let resumed = false;
     if (saved) {
       try {
         await session.resumeSession(saved);
+        resumed = true;
       } catch (err) {
         // ⛔ ONLY A REFUSED REFRESH TOKEN ENDS THE STORED SESSION. Dropping the
         // shared row on any rejection would send several processes to
@@ -359,7 +364,27 @@ async function getAgent(): Promise<Agent> {
       }
     }
 
-    if (!session.hasSession) {
+    // The unproven case, settled by the session the resume left. @atproto/api's
+    // refresh fills `email` from getSession when refreshSession omits it, so a
+    // reported email that differs is another account: drop the row (same
+    // ordering rule as above) and log in. ⚠️ Still no email (an app-password
+    // session, or a getSession the library swallowed) proves nothing either
+    // way, and dropping it would spend one of ten daily createSession calls on
+    // every cold start, so the session is KEPT: the identifier we were given
+    // cannot show it is someone else's.
+    let otherAccount = false;
+    if (resumed && owner === "unproven") {
+      const reported = session.session?.email;
+      if (reported && reported.toLowerCase() !== creds.identifier.toLowerCase()) {
+        console.warn("[bluesky] the resumed session belongs to another account; dropping it and logging in");
+        otherAccount = true;
+        await Promise.resolve()
+          .then(() => _sessionStore?.save(null))
+          .catch(() => {});
+      }
+    }
+
+    if (otherAccount || !session.hasSession) {
       try {
         await session.login({ identifier: creds.identifier, password: creds.password });
       } catch (err) {
@@ -380,13 +405,18 @@ async function getAgent(): Promise<Agent> {
 }
 
 /**
- * Whether a stored session is the configured account's. The identifier is a
- * handle or an email (createSession's two forms) or a did; handles and emails
- * compare case-insensitively.
+ * Whose a stored session is, as far as it shows. The identifier is a handle or
+ * an email (createSession's two forms) or a did; all compare
+ * case-insensitively. A handle or did match is the configured account's. An
+ * email identifier can only be compared with an email the session carries, so
+ * a session with none is `unproven` (getAgent resumes it and checks the email
+ * the resumed session reports); anything else that does not match is `other`.
  */
-function sessionBelongsTo(saved: AtpSessionData, identifier: string): boolean {
+function sessionOwner(saved: AtpSessionData, identifier: string): "mine" | "other" | "unproven" {
   const want = identifier.toLowerCase();
-  return [saved.handle, saved.email, saved.did].some((v) => v?.toLowerCase() === want);
+  if ([saved.handle, saved.did].some((v) => v?.toLowerCase() === want)) return "mine";
+  if (!saved.email) return want.includes("@") ? "unproven" : "other";
+  return saved.email.toLowerCase() === want ? "mine" : "other";
 }
 
 export interface RichTextResult {

@@ -37,6 +37,8 @@ const h = vi.hoisted(() => ({
   fetchImpls: [] as Array<typeof globalThis.fetch>,
   persistHandlers: [] as PersistHandler[],
   agentDid: undefined as string | undefined,
+  /** What a resume leaves in `session` (the real one merges getSession's answer). */
+  resumedSession: undefined as Record<string, unknown> | undefined,
   login: vi.fn(),
   resumeSession: vi.fn(),
   detectFacets: vi.fn(),
@@ -76,7 +78,7 @@ vi.mock("@atproto/api", async (importOriginal) => {
     };
     resumeSession = async (...a: unknown[]) => {
       const r = await h.resumeSession(...a);
-      this.session = { accessJwt: "a", refreshJwt: "r", handle: "h", did: "d", active: true };
+      this.session = h.resumedSession ?? { accessJwt: "a", refreshJwt: "r", handle: "h", did: "d", active: true };
       return r;
     };
     get hasSession() {
@@ -154,6 +156,7 @@ beforeEach(() => {
   h.fetchImpls.length = 0;
   h.persistHandlers.length = 0;
   h.agentDid = "did:plc:testaccount000";
+  h.resumedSession = undefined;
   // ⚠️ mockReset, not clearAllMocks: several tests seed a *Once queue and
   // clearAllMocks would leave it for the next test to inherit.
   h.login.mockReset().mockResolvedValue(undefined);
@@ -1111,5 +1114,84 @@ describe("session ownership", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  /**
+   * ⛔ A STORED SESSION WITH NO EMAIL IS NOT EVIDENCE OF ANOTHER ACCOUNT. The
+   * PDS can leave `email` out of a session (refreshSession historically, and a
+   * getSession that fails is swallowed by @atproto/api), so dropping every
+   * such row under an email identifier sent each cold start to createSession,
+   * which allows ten a day. It is resumed, and the email the resumed session
+   * reports decides.
+   */
+  describe("an email identifier and a stored session without an email", () => {
+    const NO_EMAIL = { ...STORED, email: undefined };
+    const resumedAs = (email: string | undefined) => ({ ...NO_EMAIL, accessJwt: "a2", email });
+
+    beforeEach(() => {
+      setBlueskyCredentialsResolver(async () => ({ identifier: "Ops@example.com", password: "app-password" }));
+    });
+
+    it("resumes, and keeps the session when the resumed one reports the configured email", async () => {
+      const save = vi.fn(async () => {});
+      h.resumedSession = resumedAs("ops@EXAMPLE.com");
+      setBlueskySessionStore({ load: async () => NO_EMAIL, save });
+      await openSession();
+      expect(h.resumeSession).toHaveBeenCalledTimes(1);
+      expect(h.login).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalledWith(null);
+    });
+
+    it("drops it and logs in as the configured account when the resumed one reports ANOTHER email", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const save = vi.fn(async () => {});
+        h.resumedSession = resumedAs("someone@else.example");
+        setBlueskySessionStore({ load: async () => NO_EMAIL, save });
+        await openSession();
+        expect(h.resumeSession).toHaveBeenCalledTimes(1);
+        expect(save).toHaveBeenCalledWith(null);
+        expect(h.login).toHaveBeenCalledWith({ identifier: "Ops@example.com", password: "app-password" });
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/resumed session belongs to another account/));
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("still logs in as the configured account when that stored session cannot be cleared", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        h.resumedSession = resumedAs("someone@else.example");
+        setBlueskySessionStore({
+          load: async () => NO_EMAIL,
+          save: async () => {
+            throw new Error("database down");
+          },
+        });
+        await expect(openSession()).resolves.toBeUndefined();
+        expect(h.login).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("keeps the session, and does not log in, when the resumed one still reports no email", async () => {
+      const save = vi.fn(async () => {});
+      h.resumedSession = resumedAs(undefined);
+      setBlueskySessionStore({ load: async () => NO_EMAIL, save });
+      await openSession();
+      expect(h.resumeSession).toHaveBeenCalledTimes(1);
+      expect(h.login).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalledWith(null);
+    });
+
+    it("logs in without an email check when the resume itself is refused", async () => {
+      const save = vi.fn(async () => {});
+      h.resumeSession.mockRejectedValue(new XRPCError(401, "ExpiredToken", "expired"));
+      setBlueskySessionStore({ load: async () => NO_EMAIL, save });
+      await openSession();
+      expect(save).toHaveBeenCalledWith(null);
+      expect(h.login).toHaveBeenCalledTimes(1);
+    });
   });
 });
