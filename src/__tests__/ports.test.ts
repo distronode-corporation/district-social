@@ -151,6 +151,15 @@ describe("inMemoryMediaStore", () => {
       await expect(store.put(bad, new Uint8Array(), "image/png")).rejects.toThrow(/invalid media key/);
     }
   });
+
+  it("percent-encodes each key segment in the URL, keeping the slashes between them", async () => {
+    const store = inMemoryMediaStore("https://media.example.com");
+    const stored = await store.put("cards/a b#1?.png", new Uint8Array([1]), "image/png");
+    expect(stored.url).toBe("https://media.example.com/cards/a%20b%231%3F.png");
+    // The key itself is stored as given.
+    expect(stored.key).toBe("cards/a b#1?.png");
+    expect(await store.get("cards/a b#1?.png")).not.toBeNull();
+  });
 });
 
 describe("inMemoryApprovalGate", () => {
@@ -213,6 +222,21 @@ describe("inMemoryApprovalGate", () => {
     const rows = await gate.evidence("ap1");
     expect(rows.map((r) => r.legs[0])).toEqual([{ platform: "linkedin", ref: "r" }, { platform: "x", error: "refused" }]);
     expect(await gate.evidence("none")).toEqual([]);
+  });
+
+  it("refuses evidence for another draft or other renders than the approval consumed", async () => {
+    const gate = inMemoryApprovalGate();
+    grant(gate);
+    await gate.consume("ap1", subject);
+    const evidence = { approvalId: "ap1", draftId: "d1", rendersHash: "h1", at: "t", legs: [] };
+    await expect(gate.recordEvidence({ ...evidence, draftId: "d2" })).rejects.toMatchObject({
+      name: "ApprovalRefusedError",
+      reason: "wrong-draft",
+    });
+    await expect(gate.recordEvidence({ ...evidence, rendersHash: "h2" })).rejects.toMatchObject({
+      reason: "renders-changed",
+    });
+    expect(await gate.evidence("ap1")).toEqual([]);
   });
 
   it("gives the engine no way to grant: the ApprovalGate type only consumes", () => {

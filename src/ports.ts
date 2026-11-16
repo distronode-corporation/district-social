@@ -210,7 +210,11 @@ export interface MediaStore {
   delete(key: string): Promise<void>;
 }
 
-/** Keys are URL path segments under `baseUrl`; a key with `..` or a leading `/` is refused. */
+/**
+ * Keys are URL path segments under `baseUrl`; a key with `..` or a leading `/`
+ * is refused. Each segment is percent-encoded in the URL, so a key carrying a
+ * space, `#` or `?` still names its own object rather than a fragment or query.
+ */
 export function inMemoryMediaStore(baseUrl = "memory://media"): MediaStore {
   const objects = new Map<string, { body: Uint8Array; contentType: string }>();
   const checkKey = (key: string) => {
@@ -220,7 +224,8 @@ export function inMemoryMediaStore(baseUrl = "memory://media"): MediaStore {
     async put(key, body, contentType) {
       checkKey(key);
       objects.set(key, { body: body.slice(), contentType });
-      return { key, contentType, bytes: body.byteLength, url: `${baseUrl.replace(/\/+$/, "")}/${key}` };
+      const path = key.split("/").map(encodeURIComponent).join("/");
+      return { key, contentType, bytes: body.byteLength, url: `${baseUrl.replace(/\/+$/, "")}/${path}` };
     },
     async get(key) {
       const obj = objects.get(key);
@@ -310,6 +315,16 @@ export function inMemoryApprovalGate(clock: Clock = systemClock): InMemoryApprov
     async recordEvidence(evidence) {
       if (!used.has(evidence.approvalId)) {
         throw new ApprovalRefusedError("unknown", `no consumed approval ${evidence.approvalId} to record against`);
+      }
+      // The same subject checks consume makes: evidence names the draft and
+      // renders it published, and they must be the ones this approval covered.
+      // Non-null: `used` only ever holds ids consume found in `approvals`.
+      const approval = approvals.get(evidence.approvalId)!;
+      if (approval.draftId !== evidence.draftId) {
+        throw new ApprovalRefusedError("wrong-draft", `approval ${evidence.approvalId} is for another draft`);
+      }
+      if (approval.rendersHash !== evidence.rendersHash) {
+        throw new ApprovalRefusedError("renders-changed", `evidence for approval ${evidence.approvalId} names other renders`);
       }
       const rows = log.get(evidence.approvalId) ?? [];
       rows.push(structuredClone(evidence));
