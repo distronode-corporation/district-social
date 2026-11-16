@@ -132,10 +132,10 @@ function postUrl(pinId: string): string {
  * Throws rather than skipping an unsupported asset: a silently dropped image
  * is exactly the kind of quiet content loss this migration exists to stop
  * (see this file's docblock on the destination link, a different instance of
- * the same principle). GIFs and videos are excluded up front by
- * the caller (publishNow) with their own clear errors, so by the time this
- * runs every candidate is a still image that only needs a supported mime type
- * and a fetchable URL to become sendable.
+ * the same principle). GIFs and videos are refused up front by the caller
+ * (publishNow) with their own clear errors, so by the time this runs every
+ * selected asset is a still image that only needs a supported mime type and a
+ * public URL (requireMediaUrl) to become sendable.
  */
 async function collectImages(media: MediaAsset[]): Promise<PinterestImageSource[]> {
   const candidates = media.filter((m) => m.type === "image").slice(0, MAX_IMAGES);
@@ -220,6 +220,17 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
     // refusal) marks it as "we refused to send", not a vendor failure.
     throw new PublishPreflightError(
       "pinterest: video pins are not supported by the direct transport yet (attach an image instead, or publish this one via the aggregator)",
+    );
+  }
+
+  if (media.some((m) => m.type === "gif")) {
+    // `image_base64` declares only image/jpeg and image/png, and this file
+    // filtered to `type === "image"`, so a GIF beside a still image was
+    // dropped from the pin without a word. Refused by name instead, as
+    // instagram-transport.ts's assertNoGif does.
+    throw new PublishPreflightError(
+      "pinterest: animated GIFs are not supported by the direct transport (Pinterest's image_base64 media source " +
+        "accepts only image/jpeg or image/png). Attach a static JPEG or PNG instead, or drop Pinterest from this leg's targets.",
     );
   }
 

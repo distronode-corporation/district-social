@@ -373,12 +373,24 @@ describe("pinterest transport: non-Error failures, url-less assets and media hos
     fetchMock().mockImplementation(async () => new Response(new Uint8Array([4])));
     createPinMock.mockResolvedValue({ id: "pin-2", link: undefined, title: "t", boardId: "board-1" });
 
-    await pinterestTransport.publishNow(input({ media: [image({ url: undefined, path: "/lib/a.png" }), image()] }));
+    await expect(
+      pinterestTransport.publishNow(input({ media: [image({ url: undefined, path: "/lib/a.png" }), image()] })),
+    ).rejects.toMatchObject({
+      name: "PublishPreflightError",
+      message: expect.stringContaining("pinterest: media asset /lib/a.png has no public url"),
+    });
+    expect(createPinMock).not.toHaveBeenCalled();
+  });
 
-    expect(fetchMock()).toHaveBeenCalledTimes(1);
-    expect(createPinMock).toHaveBeenCalledWith(
-      expect.objectContaining({ images: [{ contentType: "image/png", data: Buffer.from([4]).toString("base64") }] }),
-    );
+  it("refuses a GIF beside a still image instead of dropping it from the pin", async () => {
+    fetchMock().mockImplementation(async () => new Response(new Uint8Array([4])));
+    await expect(
+      pinterestTransport.publishNow(
+        input({ media: [image(), image({ type: "gif", mimeType: "image/gif", path: "/lib/a.gif" })] }),
+      ),
+    ).rejects.toMatchObject({ name: "PublishPreflightError", message: expect.stringMatching(/animated GIFs/) });
+    expect(fetchMock()).not.toHaveBeenCalled();
+    expect(createPinMock).not.toHaveBeenCalled();
   });
 
   it("postFacts logs a non-Error lookup failure and reports QUEUE", async () => {
