@@ -34,6 +34,7 @@
  */
 
 import { getErrorMessage } from "../error-message.js";
+import { ResponseShapeError } from "./shape.js";
 
 /** Attempts INCLUDING the first. 3 means at most two retries. */
 const MAX_ATTEMPTS = 3;
@@ -97,6 +98,9 @@ export function isRejection(err: unknown): boolean {
  * and says nothing about whether the request was performed.
  */
 export function isUnknownOutcome(err: unknown): boolean {
+  // A 2xx answer whose body is not the shape the client reads: the vendor
+  // performed the request, so a create may have landed (see shape.ts).
+  if (err instanceof ResponseShapeError) return true;
   const status = statusOf(err);
   if (status !== undefined && (status >= 500 || status === 408)) return true;
 

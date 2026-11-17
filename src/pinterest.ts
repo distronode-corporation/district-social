@@ -28,6 +28,7 @@
 import type { RecentPostsPage } from "./recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { shape } from "./http/shape.js";
 
 /**
  * Production by default. `PINTEREST_API_BASE` exists for exactly one reason and
@@ -140,11 +141,11 @@ async function token(): Promise<string> {
   return t;
 }
 
-async function request<T>(
+async function request(
   method: string,
   path: string,
   opts: { body?: unknown; timeoutMs?: number } = {},
-): Promise<T> {
+): Promise<unknown> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const resOpts: VendorFetchOptions = { timeoutMs, wrap: (status, message) => new PinterestError(status, message, method, path) };
@@ -161,12 +162,12 @@ async function request<T>(
     resOpts,
   );
   // DELETE returns 204 with no body on success — nothing to parse.
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) return undefined;
   const text = await vendorText(res, resOpts);
   if (!res.ok) throw new PinterestError(res.status, text, method, path, retryAfterHeader(res));
-  if (!text) return undefined as T;
+  if (!text) return undefined;
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch {
     throw new PinterestError(res.status, `expected JSON, got: ${text.slice(0, 200)}`, method, path);
   }
@@ -217,19 +218,14 @@ export interface PinterestPin {
   boardId?: string;
 }
 
-interface PinResponse {
-  id: string;
-  link?: string | null;
-  title?: string | null;
-  board_id?: string;
-}
-
-function toPin(r: PinResponse): PinterestPin {
+function toPin(value: unknown, operation: string): PinterestPin {
+  const s = shape("pinterest", operation);
+  const r = s.obj(value, "(body)");
   return {
-    id: r.id,
-    link: r.link ?? undefined,
-    title: r.title ?? undefined,
-    boardId: r.board_id,
+    id: s.id(r.id, "id"),
+    link: s.optStr(r.link, "link"),
+    title: s.optStr(r.title, "title"),
+    boardId: s.optStr(r.board_id, "board_id"),
   };
 }
 
@@ -266,8 +262,7 @@ export async function createPin(input: CreatePinInput): Promise<PinterestPin> {
   if (input.link) body.link = input.link;
   if (input.altText) body.alt_text = input.altText;
 
-  const res = await request<PinResponse>("POST", "/pins", { body, timeoutMs: CREATE_PIN_TIMEOUT_MS });
-  return toPin(res);
+  return toPin(await request("POST", "/pins", { body, timeoutMs: CREATE_PIN_TIMEOUT_MS }), "POST /pins");
 }
 
 /**
@@ -278,8 +273,7 @@ export async function createPin(input: CreatePinInput): Promise<PinterestPin> {
  * thin passthrough and leaves the "already gone" call to bluesky-transport.ts.
  */
 export async function getPin(pinId: string): Promise<PinterestPin> {
-  const res = await request<PinResponse>("GET", `/pins/${encodeURIComponent(pinId)}`);
-  return toPin(res);
+  return toPin(await request("GET", `/pins/${encodeURIComponent(pinId)}`), "GET /pins/:id");
 }
 
 /**
@@ -290,7 +284,7 @@ export async function getPin(pinId: string): Promise<PinterestPin> {
  * deleteRecord.
  */
 export async function deletePin(pinId: string): Promise<void> {
-  await request<void>("DELETE", `/pins/${encodeURIComponent(pinId)}`);
+  await request("DELETE", `/pins/${encodeURIComponent(pinId)}`);
 }
 
 export interface PinterestBoard {
@@ -298,10 +292,6 @@ export interface PinterestBoard {
   name: string;
 }
 
-interface BoardsPage {
-  items: Array<{ id: string; name: string }>;
-  bookmark?: string | null;
-}
 
 /**
  * GET /boards, following the `bookmark` cursor to the end.
@@ -318,17 +308,17 @@ export async function listBoards(): Promise<PinterestBoard[]> {
   const out: PinterestBoard[] = [];
   let bookmark: string | undefined;
   for (;;) {
-    const page = await request<BoardsPage>(
-      "GET",
-      withQuery("/boards", { page_size: String(BOARDS_PAGE_SIZE), bookmark }),
-    );
-    for (const b of page.items ?? []) {
-      if (b && typeof b.id === "string" && typeof b.name === "string") {
-        out.push({ id: b.id, name: b.name });
-      }
+    const s = shape("pinterest", "GET /boards");
+    const page = s.obj(await request("GET", withQuery("/boards", { page_size: String(BOARDS_PAGE_SIZE), bookmark })), "(body)");
+    for (const b of s.optEach(page.items, "items", (item, at) => {
+      const board = s.obj(item, at);
+      return { id: s.id(board.id, `${at}.id`), name: s.str(board.name, `${at}.name`) };
+    })) {
+      out.push(b);
     }
-    if (!page.bookmark) break;
-    bookmark = page.bookmark;
+    const next = s.optStr(page.bookmark, "bookmark");
+    if (!next) break;
+    bookmark = next;
   }
   return out;
 }
@@ -340,8 +330,9 @@ export interface PinterestAccount {
 
 /** GET /user_account. The token's own profile — used for connectStatus(). */
 export async function getUserAccount(): Promise<PinterestAccount> {
-  const res = await request<{ id: string; username: string }>("GET", "/user_account");
-  return { id: res.id, username: res.username };
+  const s = shape("pinterest", "GET /user_account");
+  const res = s.obj(await request("GET", "/user_account"), "(body)");
+  return { id: s.id(res.id, "id"), username: s.id(res.username, "username") };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -378,11 +369,13 @@ export const PINTEREST_PIN_METRICS = ["IMPRESSION", "PIN_CLICK", "OUTBOUND_CLICK
  * already a flat `{ metric: number }` has been observed for some pin formats.
  * An unreadable value is ABSENT rather than 0.
  */
-function extractPinterestMetrics(payload: unknown): Record<string, number> {
-  if (!payload || typeof payload !== "object") return {};
-  const root = payload as Record<string, unknown>;
-  const all = (root.ALL ?? root.all) as Record<string, unknown> | undefined;
-  const candidate = (all?.summary_metrics ?? all?.lifetime_metrics ?? all ?? root) as Record<string, unknown>;
+function extractPinterestMetrics(payload: unknown, operation: string): Record<string, number> {
+  const s = shape("pinterest", operation);
+  if (payload === undefined) return {};
+  const root = s.obj(payload, "(body)");
+  const all = s.optObj(root.ALL ?? root.all, "ALL");
+  const candidate =
+    s.optObj(all?.summary_metrics, "ALL.summary_metrics") ?? s.optObj(all?.lifetime_metrics, "ALL.lifetime_metrics") ?? all ?? root;
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(candidate)) {
     if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
@@ -398,8 +391,8 @@ export async function getPinAnalytics(pinId: string): Promise<Record<string, num
     metric_types: PINTEREST_PIN_METRICS.join(","),
     app_types: "ALL",
   });
-  const res = await request<unknown>("GET", `/pins/${encodeURIComponent(pinId)}/analytics?${query.toString()}`);
-  return extractPinterestMetrics(res);
+  const res = await request("GET", `/pins/${encodeURIComponent(pinId)}/analytics?${query.toString()}`);
+  return extractPinterestMetrics(res, "GET /pins/:id/analytics");
 }
 
 const PINTEREST_ACCOUNT_METRICS = ["IMPRESSION", "PIN_CLICK", "OUTBOUND_CLICK", "SAVE", "ENGAGEMENT"] as const;
@@ -412,8 +405,8 @@ export async function getAccountAnalytics(): Promise<Record<string, number>> {
     metric_types: PINTEREST_ACCOUNT_METRICS.join(","),
     app_types: "ALL",
   });
-  const res = await request<unknown>("GET", `/user_account/analytics?${query.toString()}`);
-  return extractPinterestMetrics(res);
+  const res = await request("GET", `/user_account/analytics?${query.toString()}`);
+  return extractPinterestMetrics(res, "GET /user_account/analytics");
 }
 
 /**
@@ -424,8 +417,8 @@ export async function getAccountAnalytics(): Promise<Record<string, number>> {
  * THROWS rather than reporting 0, for the same reason as the other platforms.
  */
 export async function getFollowerCount(): Promise<{ followers: number }> {
-  const res = await request<{ follower_count?: unknown }>("GET", "/user_account");
-  const raw = res.follower_count;
+  const s = shape("pinterest", "GET /user_account");
+  const raw = s.obj(await request("GET", "/user_account"), "(body)").follower_count;
   if (typeof raw !== "number" || !Number.isFinite(raw)) {
     throw new PinterestError(
       0,
@@ -450,23 +443,21 @@ const RECENT_PINS_PAGE_SIZE = 25;
  * there are no further pages.
  */
 export async function listRecentPins(): Promise<RecentPostsPage> {
-  const page = await request<{
-    items?: Array<{ id?: string; title?: string | null; description?: string | null; created_at?: string }>;
-    bookmark?: string | null;
-  }>("GET", withQuery("/pins", { page_size: String(RECENT_PINS_PAGE_SIZE) }));
-  const posts = (page.items ?? []).flatMap((p) =>
-    typeof p.id === "string" && p.id
-      ? [
-          {
-            id: p.id,
-            texts: [p.description, p.title].filter((t): t is string => typeof t === "string"),
-            // Pinterest's created_at is UTC with no offset (`2026-11-08T05:00:00`).
-            createdAt: p.created_at ? toUtcIso(p.created_at) : null,
-          },
-        ]
-      : [],
-  );
-  return { posts, more: Boolean(page.bookmark), unordered: true };
+  const s = shape("pinterest", "GET /pins");
+  const page = s.obj(await request("GET", withQuery("/pins", { page_size: String(RECENT_PINS_PAGE_SIZE) })), "(body)");
+  const posts = s.optEach(page.items, "items", (item, at) => {
+    const p = s.obj(item, at);
+    const createdAt = s.optStr(p.created_at, `${at}.created_at`);
+    return {
+      id: s.id(p.id, `${at}.id`),
+      texts: [s.optStr(p.description, `${at}.description`), s.optStr(p.title, `${at}.title`)].filter(
+        (t): t is string => t !== undefined,
+      ),
+      // Pinterest's created_at is UTC with no offset (`2026-11-08T05:00:00`).
+      createdAt: createdAt ? toUtcIso(createdAt) : null,
+    };
+  });
+  return { posts, more: Boolean(s.optStr(page.bookmark, "bookmark")), unordered: true };
 }
 
 function toUtcIso(value: string): string | null {

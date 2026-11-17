@@ -254,15 +254,26 @@ describe("pinterest client", () => {
       await expect(listBoards()).rejects.toBeInstanceOf(PinterestError);
     });
 
-    it("skips malformed entries rather than throwing on one bad element", async () => {
+    it("refuses a malformed entry rather than guessing which boards exist", async () => {
       (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         jsonResponse(200, {
           items: [{ id: "b1", name: "Good" }, { id: 123, name: "Bad id type" }, {}],
           bookmark: null,
         }),
       );
-      const boards = await listBoards();
-      expect(boards).toEqual([{ id: "b1", name: "Good" }]);
+      await expect(listBoards()).rejects.toThrow(
+        "pinterest GET /boards: unexpected response shape at items[1].id: expected a non-empty string, got a number",
+      );
+    });
+
+    it("refuses a page whose items or bookmark are the wrong type", async () => {
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: {} }));
+      await expect(listBoards()).rejects.toThrow("at items: expected an array, got an object");
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [{ id: "b1", name: 3 }] }));
+      await expect(listBoards()).rejects.toThrow("at items[0].name: expected a string, got a number");
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { items: [], bookmark: 7 }));
+      await expect(listBoards()).rejects.toThrow("at bookmark: expected a string, got a number");
     });
   });
 

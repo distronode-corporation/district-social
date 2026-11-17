@@ -22,6 +22,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { shape, type JsonObject, type Shape } from "./http/shape.js";
 
 /**
  * `LinkedIn-Version` header value, `YYYYMM`. VERIFIED against the Posts,
@@ -283,8 +284,9 @@ interface RequestOpts {
   headers?: Record<string, string>;
 }
 
-interface RequestResult<T> {
-  data: T;
+interface RequestResult {
+  /** The parsed body, unread: each caller reads the fields it uses through a Shape. */
+  data: unknown;
   headers: Headers;
 }
 
@@ -294,7 +296,7 @@ interface RequestResult<T> {
  * alongside the parsed body because createPost's id lives in a header, not
  * the body — see the note there.
  */
-async function request<T>(method: string, path: string, opts: RequestOpts = {}): Promise<RequestResult<T>> {
+async function request(method: string, path: string, opts: RequestOpts = {}): Promise<RequestResult> {
   const token = await getToken();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const resOpts: VendorFetchOptions = { timeoutMs, wrap: (status, message) => new LinkedInError(status, message, method, path) };
@@ -323,29 +325,27 @@ async function request<T>(method: string, path: string, opts: RequestOpts = {}):
   logLinkedInCall({ method, path: `${BASE_PATH}${path}`, status: res.status, liUuid: res.headers.get("x-li-uuid") });
   const text = await vendorText(res, resOpts);
   if (!res.ok) throw new LinkedInError(res.status, text, method, path, retryAfterHeader(res));
-  if (!text) return { data: undefined as T, headers: res.headers };
+  if (!text) return { data: undefined, headers: res.headers };
   try {
-    return { data: JSON.parse(text) as T, headers: res.headers };
+    return { data: JSON.parse(text) as unknown, headers: res.headers };
   } catch {
     throw new LinkedInError(res.status, `expected JSON, got: ${text.slice(0, 200)}`, method, path);
   }
 }
 
-interface OrgAclElement {
-  role?: string;
-  state?: string;
-  /**
-   * ⚠️ LinkedIn's own documentation is internally inconsistent about this
-   * field's name for `GET /organizationAcls?q=roleAssignee`: the "Find a
-   * Member's Organization Access Control Information" section's FIRST sample
-   * response uses `organization`, but the very same section's paginated
-   * example — same query, same finder — uses `organizationTarget`. UNVERIFIED
-   * against the live API which one actually comes back, so both are read
-   * below.
-   * https://learn.microsoft.com/en-us/linkedin/marketing/community-management/organizations/organization-access-control-by-role
-   */
-  organization?: string;
-  organizationTarget?: string;
+
+/**
+ * A Rest.li collection's `elements`, each an object, from a body that may be
+ * empty. The elements' own fields are read by the caller with the same Shape.
+ */
+function elementsOf(s: Shape, data: unknown): Array<{ e: JsonObject; at: string }> {
+  if (data === undefined) return [];
+  return s.optEach(s.obj(data, "(body)").elements, "elements", (item, at) => ({ e: s.obj(item, at), at }));
+}
+
+/** An element's `totalShareStatistics`, an object or absent; its values are filtered by keepFinite or sum. */
+function shareStats(s: Shape, e: JsonObject, at: string): JsonObject | undefined {
+  return s.optObj(e.totalShareStatistics, `${at}.totalShareStatistics`);
 }
 
 let _pinnedOrgId: string | null = null;
@@ -381,12 +381,10 @@ async function fetchOrganizationUrn(): Promise<string> {
       : `urn:li:organization:${_pinnedOrgId}`;
   }
 
-  const { data } = await request<{ elements?: OrgAclElement[] }>(
-    "GET",
-    "/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&state=APPROVED",
-  );
-  const urns = (data?.elements ?? [])
-    .map((e) => e.organization ?? e.organizationTarget)
+  const { data } = await request("GET", "/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&state=APPROVED");
+  const s = shape("linkedin", "GET /organizationAcls");
+  const urns = elementsOf(s, data)
+    .map(({ e, at }) => s.optStr(e.organization, `${at}.organization`) ?? s.optStr(e.organizationTarget, `${at}.organizationTarget`))
     .filter((u): u is string => Boolean(u));
 
   if (!urns.length) {
@@ -479,8 +477,9 @@ export async function createPost(input: CreatePostInput): Promise<{ ref: string 
       media: { id: input.media.id, ...(input.media.altText ? { altText: input.media.altText } : {}) },
     };
   }
-  const { data, headers } = await request<{ id?: string }>("POST", "/posts", { body });
-  const ref = headers.get("x-restli-id") ?? data?.id;
+  const { data, headers } = await request("POST", "/posts", { body });
+  const s = shape("linkedin", "POST /posts");
+  const ref = headers.get("x-restli-id") ?? (data === undefined ? undefined : s.optStr(s.obj(data, "(body)").id, "id"));
   if (!ref) {
     throw new LinkedInError(0, "post created but no id was returned (missing x-restli-id header)", "POST", "/posts");
   }
@@ -544,10 +543,24 @@ export interface LinkedInBatchGetResult {
 export async function getPostsBatch(refs: string[]): Promise<LinkedInBatchGetResult> {
   if (!refs.length) return { results: {} };
   const idsParam = `List(${refs.map((r) => encodeURIComponent(r)).join(",")})`;
-  const { data } = await request<LinkedInBatchGetResult>("GET", `/posts?ids=${idsParam}`, {
+  const { data } = await request("GET", `/posts?ids=${idsParam}`, {
     headers: { "X-RestLi-Method": "BATCH_GET" },
   });
-  return data ?? { results: {} };
+  if (data === undefined) return { results: {} };
+  const s = shape("linkedin", "GET /posts BATCH_GET");
+  const body = s.obj(data, "(body)");
+  const result: LinkedInBatchGetResult = {};
+  const results = s.optObj(body.results, "results");
+  const statuses = s.optObj(body.statuses, "statuses");
+  const errors = s.optObj(body.errors, "errors");
+  if (results) result.results = results;
+  if (statuses) {
+    result.statuses = Object.fromEntries(
+      Object.entries(statuses).map(([key, value]) => [key, s.num(value, `statuses[${JSON.stringify(key)}]`)]),
+    );
+  }
+  if (errors) result.errors = errors;
+  return result;
 }
 
 export interface LinkedInImageUpload {
@@ -564,13 +577,11 @@ export interface LinkedInImageUpload {
 export async function initializeImageUpload(): Promise<LinkedInImageUpload> {
   await guardWrite("post");
   const owner = await getOrganizationUrn();
-  const { data } = await request<{ value?: { uploadUrl?: string; image?: string } }>(
-    "POST",
-    "/images?action=initializeUpload",
-    { body: { initializeUploadRequest: { owner } } },
-  );
-  const uploadUrl = data?.value?.uploadUrl;
-  const image = data?.value?.image;
+  const { data } = await request("POST", "/images?action=initializeUpload", { body: { initializeUploadRequest: { owner } } });
+  const s = shape("linkedin", "POST /images?action=initializeUpload");
+  const value = data === undefined ? undefined : s.optObj(s.obj(data, "(body)").value, "value");
+  const uploadUrl = s.optStr(value?.uploadUrl, "value.uploadUrl");
+  const image = s.optStr(value?.image, "value.image");
   if (!uploadUrl || !image) {
     throw new LinkedInError(
       0,
@@ -647,10 +658,6 @@ export async function uploadImageBytes(uploadUrl: string, bytes: Uint8Array<Arra
  * filtered to that post (getPostShareStatistics below). Nothing here is renamed
  * into a shared vocabulary: LinkedIn's "like" is not Instagram's.
  */
-interface LinkedInSocialActions {
-  likesSummary?: { totalLikes?: unknown };
-  commentsSummary?: { aggregatedTotalComments?: unknown };
-}
 
 function keepFinite(bag: Record<string, unknown>): Record<string, number> {
   const out: Record<string, number> = {};
@@ -662,10 +669,12 @@ function keepFinite(bag: Record<string, unknown>): Record<string, number> {
 }
 
 export async function getSocialActions(ref: string): Promise<Record<string, number>> {
-  const { data } = await request<LinkedInSocialActions>("GET", `/socialActions/${encodeUrnPathSegment(ref)}`);
+  const { data } = await request("GET", `/socialActions/${encodeUrnPathSegment(ref)}`);
+  const s = shape("linkedin", "GET /socialActions/:urn");
+  const body = data === undefined ? {} : s.obj(data, "(body)");
   return keepFinite({
-    totalLikes: data?.likesSummary?.totalLikes,
-    aggregatedTotalComments: data?.commentsSummary?.aggregatedTotalComments,
+    totalLikes: s.optObj(body.likesSummary, "likesSummary")?.totalLikes,
+    aggregatedTotalComments: s.optObj(body.commentsSummary, "commentsSummary")?.aggregatedTotalComments,
   });
 }
 
@@ -683,17 +692,16 @@ export async function getSocialActions(ref: string): Promise<Record<string, numb
  * `engagement` is a RATIO, not a count — passed through as the vendor's own
  * float rather than being scaled into a percentage here.
  */
-interface LinkedInShareStatsElement {
-  totalShareStatistics?: Record<string, unknown>;
-}
 
 export async function getShareStatistics(): Promise<Record<string, number>> {
   const orgUrn = await getOrganizationUrn();
-  const { data } = await request<{ elements?: LinkedInShareStatsElement[] }>(
+  const { data } = await request(
     "GET",
     `/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(orgUrn)}`,
   );
-  const totals = data?.elements?.[0]?.totalShareStatistics;
+  const s = shape("linkedin", "GET /organizationalEntityShareStatistics");
+  const first = elementsOf(s, data)[0];
+  const totals = first && shareStats(s, first.e, first.at);
   return totals ? keepFinite(totals) : {};
 }
 
@@ -731,10 +739,6 @@ export const LINKEDIN_POST_STAT_FIELDS = [
   "uniqueImpressionsCount",
 ] as const;
 
-interface LinkedInPostShareStatsElement extends LinkedInShareStatsElement {
-  share?: string;
-  ugcPost?: string;
-}
 
 /**
  * Lifetime statistics for ONE of the organization's posts. VERIFIED against
@@ -781,14 +785,19 @@ export async function getPostShareStatistics(ref: string): Promise<Record<string
     );
   }
   const orgUrn = await getOrganizationUrn();
-  const { data } = await request<{ elements?: LinkedInPostShareStatsElement[] }>(
+  const { data } = await request(
     "GET",
     `/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(orgUrn)}` +
       `&${filter}=List(${encodeURIComponent(ref)})`,
   );
+  const s = shape("linkedin", "GET /organizationalEntityShareStatistics");
   const field = filter === "shares" ? "share" : "ugcPost";
-  const elements = data?.elements;
-  if (!Array.isArray(elements)) return {};
+  if (data === undefined || s.obj(data, "(body)").elements === undefined) return {};
+  const elements = elementsOf(s, data).map(({ e, at }) => ({
+    share: s.optStr(e.share, `${at}.share`),
+    ugcPost: s.optStr(e.ugcPost, `${at}.ugcPost`),
+    totalShareStatistics: shareStats(s, e, at),
+  }));
   const element = elements.find((e) => e[field] === ref);
   if (!element) {
     if (elements.some((e) => !e.share && !e.ugcPost)) {
@@ -826,11 +835,9 @@ export async function getPostShareStatistics(ref: string): Promise<Record<string
  */
 export async function getFollowerCount(): Promise<{ followers: number }> {
   const orgUrn = await getOrganizationUrn();
-  const { data } = await request<{ firstDegreeSize?: unknown }>(
-    "GET",
-    `/networkSizes/${encodeUrnPathSegment(orgUrn)}?edgeType=COMPANY_FOLLOWED_BY_MEMBER`,
-  );
-  const raw = data?.firstDegreeSize;
+  const { data } = await request("GET", `/networkSizes/${encodeUrnPathSegment(orgUrn)}?edgeType=COMPANY_FOLLOWED_BY_MEMBER`);
+  const s = shape("linkedin", "GET /networkSizes/:urn");
+  const raw = data === undefined ? undefined : s.obj(data, "(body)").firstDegreeSize;
   if (typeof raw !== "number" || !Number.isFinite(raw)) {
     throw new LinkedInError(
       0,
@@ -870,12 +877,6 @@ export interface LinkedInPagePost {
   createdAt: number;
 }
 
-interface LinkedInPostElement {
-  id?: unknown;
-  commentary?: unknown;
-  createdAt?: unknown;
-  publishedAt?: unknown;
-}
 
 /** The Posts finder's documented maximum `count`. */
 const POSTS_FINDER_MAX = 100;
@@ -894,22 +895,15 @@ const POSTS_FINDER_MAX = 100;
 export async function listOrganizationPosts(limit: number): Promise<LinkedInPagePost[]> {
   const author = await getOrganizationUrn();
   const count = Math.max(1, Math.min(POSTS_FINDER_MAX, Math.floor(limit)));
-  const { data } = await request<{ elements?: LinkedInPostElement[] }>(
-    "GET",
-    `/posts?author=${encodeURIComponent(author)}&q=author&count=${count}&sortBy=CREATED`,
-    { headers: { "X-RestLi-Method": "FINDER" } },
-  );
-  const out: LinkedInPagePost[] = [];
-  for (const e of data?.elements ?? []) {
-    if (typeof e.id !== "string" || !e.id) continue;
-    const created = typeof e.createdAt === "number" ? e.createdAt : e.publishedAt;
-    out.push({
-      id: e.id,
-      commentary: typeof e.commentary === "string" ? e.commentary : "",
-      createdAt: typeof created === "number" ? created : 0,
-    });
-  }
-  return out;
+  const { data } = await request("GET", `/posts?author=${encodeURIComponent(author)}&q=author&count=${count}&sortBy=CREATED`, {
+    headers: { "X-RestLi-Method": "FINDER" },
+  });
+  const s = shape("linkedin", "GET /posts FINDER");
+  return elementsOf(s, data).map(({ e, at }): LinkedInPagePost => ({
+    id: s.id(e.id, `${at}.id`),
+    commentary: s.optStr(e.commentary, `${at}.commentary`) ?? "",
+    createdAt: s.optNum(e.createdAt, `${at}.createdAt`) ?? s.optNum(e.publishedAt, `${at}.publishedAt`) ?? 0,
+  }));
 }
 
 export interface LinkedInComment {
@@ -924,19 +918,7 @@ export interface LinkedInComment {
   parentComment?: string;
 }
 
-interface LinkedInCommentElement {
-  commentUrn?: unknown;
-  actor?: unknown;
-  message?: { text?: unknown };
-  created?: { time?: unknown };
-  parentComment?: unknown;
-}
 
-interface LinkedInPaging {
-  start?: unknown;
-  count?: unknown;
-  total?: unknown;
-}
 
 /** Highest page size this client asks for. LinkedIn may answer fewer. */
 const COMMENTS_PAGE_MAX = 100;
@@ -965,23 +947,24 @@ export async function getComments(
   const out: LinkedInComment[] = [];
   for (let page = 0; page < maxPages; page += 1) {
     const start = page * pageSize;
-    const { data } = await request<{ elements?: LinkedInCommentElement[]; paging?: LinkedInPaging }>(
-      "GET",
-      `/socialActions/${encodeUrnPathSegment(target)}/comments?start=${start}&count=${pageSize}`,
-    );
-    const elements = data?.elements ?? [];
-    for (const e of elements) {
-      const text = typeof e.message?.text === "string" ? e.message.text : "";
-      if (typeof e.commentUrn !== "string" || !e.commentUrn || !text.trim()) continue;
+    const { data } = await request("GET", `/socialActions/${encodeUrnPathSegment(target)}/comments?start=${start}&count=${pageSize}`);
+    const s = shape("linkedin", "GET /socialActions/:urn/comments");
+    const elements = elementsOf(s, data);
+    for (const { e, at } of elements) {
+      const commentUrn = s.id(e.commentUrn, `${at}.commentUrn`);
+      const text = s.optStr(s.optObj(e.message, `${at}.message`)?.text, `${at}.message.text`) ?? "";
+      // A comment with no words (an image or a reaction only) has nothing to answer.
+      if (!text.trim()) continue;
+      const parentComment = s.optStr(e.parentComment, `${at}.parentComment`);
       out.push({
-        commentUrn: e.commentUrn,
-        actor: typeof e.actor === "string" ? e.actor : "",
+        commentUrn,
+        actor: s.optStr(e.actor, `${at}.actor`) ?? "",
         text,
-        createdAt: typeof e.created?.time === "number" ? e.created.time : 0,
-        ...(typeof e.parentComment === "string" ? { parentComment: e.parentComment } : {}),
+        createdAt: s.optNum(s.optObj(e.created, `${at}.created`)?.time, `${at}.created.time`) ?? 0,
+        ...(parentComment !== undefined ? { parentComment } : {}),
       });
     }
-    const total = data?.paging?.total;
+    const total = data === undefined ? undefined : s.optNum(s.optObj(s.obj(data, "(body)").paging, "paging")?.total, "paging.total");
     const more =
       elements.length === pageSize && (typeof total !== "number" || start + elements.length < total);
     if (!more) break;
@@ -1010,7 +993,7 @@ export async function replyToComment(input: {
 }): Promise<{ commentUrn: string | null }> {
   await guardWrite("comment");
   const actor = await getOrganizationUrn();
-  const { data, headers } = await request<{ commentUrn?: unknown }>(
+  const { data, headers } = await request(
     "POST",
     `/socialActions/${encodeUrnPathSegment(input.commentUrn)}/comments`,
     {
@@ -1022,7 +1005,8 @@ export async function replyToComment(input: {
       },
     },
   );
-  const urn = typeof data?.commentUrn === "string" && data.commentUrn ? data.commentUrn : null;
+  const s = shape("linkedin", "POST /socialActions/:urn/comments");
+  const urn = data === undefined ? null : s.optStr(s.obj(data, "(body)").commentUrn, "commentUrn") || null;
   return { commentUrn: urn ?? headers.get("x-restli-id") };
 }
 
@@ -1109,15 +1093,15 @@ function sum(values: unknown[]): number {
  */
 export async function getFollowerGains(window: LinkedInStatsWindow): Promise<Record<string, number>> {
   const orgUrn = await getOrganizationUrn();
-  const { data } = await request<{
-    elements?: { followerGains?: { organicFollowerGain?: unknown; paidFollowerGain?: unknown } }[];
-  }>(
+  const { data } = await request(
     "GET",
     `/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(orgUrn)}` +
       `&${timeIntervalsParam(window)}`,
   );
-  const elements = data?.elements;
-  if (!Array.isArray(elements)) {
+  const s = shape("linkedin", "GET /organizationalEntityFollowerStatistics");
+  const hasElements = data !== undefined && s.obj(data, "(body)").elements !== undefined;
+  const gains = elementsOf(s, data).map(({ e, at }) => s.optObj(e.followerGains, `${at}.followerGains`));
+  if (!hasElements) {
     throw new LinkedInError(
       0,
       "time-bound follower statistics returned no elements array; refusing to report 0 new followers",
@@ -1126,8 +1110,8 @@ export async function getFollowerGains(window: LinkedInStatsWindow): Promise<Rec
     );
   }
   return {
-    organicFollowerGain: sum(elements.map((e) => e.followerGains?.organicFollowerGain)),
-    paidFollowerGain: sum(elements.map((e) => e.followerGains?.paidFollowerGain)),
+    organicFollowerGain: sum(gains.map((g) => g?.organicFollowerGain)),
+    paidFollowerGain: sum(gains.map((g) => g?.paidFollowerGain)),
   };
 }
 
@@ -1162,13 +1146,15 @@ export const LINKEDIN_WINDOW_SUMMABLE_FIELDS = [
  */
 export async function getShareStatisticsWindow(window: LinkedInStatsWindow): Promise<Record<string, number>> {
   const orgUrn = await getOrganizationUrn();
-  const { data } = await request<{ elements?: LinkedInShareStatsElement[] }>(
+  const { data } = await request(
     "GET",
     `/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(orgUrn)}` +
       `&${timeIntervalsParam(window)}`,
   );
-  const elements = data?.elements;
-  if (!Array.isArray(elements)) {
+  const s = shape("linkedin", "GET /organizationalEntityShareStatistics");
+  const hasElements = data !== undefined && s.obj(data, "(body)").elements !== undefined;
+  const elements = elementsOf(s, data).map(({ e, at }) => ({ totalShareStatistics: shareStats(s, e, at) }));
+  if (!hasElements) {
     throw new LinkedInError(
       0,
       "time-bound share statistics returned no elements array; refusing to report 0 activity",
