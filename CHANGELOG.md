@@ -12,6 +12,14 @@ in the version bump, before the tag.
 
 ## [Unreleased]
 
+### Added
+
+- Release assets. A tag's release workflow now attaches the npm tarball, `SHA256SUMS` and the
+  provenance npm recorded for it (`.sigstore.json` and `.intoto.jsonl`) to the GitHub
+  release, and SECURITY.md says how to verify them.
+- Community health files: issue forms, a pull request template and SUPPORT.md, plus a threat
+  model in SECURITY.md and badges in the README.
+
 ## [0.1.0] - 2026-11-16
 
 The first release. The npm package is the engine: ES modules with TypeScript declarations,

@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/distronode-corporation/district-social/security/advisories/new
+    about: >-
+      Please report vulnerabilities privately through GitHub's private vulnerability
+      reporting, never in a public issue. SECURITY.md has the details and an email fallback.
+  - name: Ask a question
+    url: https://github.com/distronode-corporation/district-social/blob/main/SUPPORT.md
+    about: Where to ask, and what this project does and does not support.

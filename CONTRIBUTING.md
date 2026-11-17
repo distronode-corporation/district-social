@@ -79,7 +79,9 @@ A release is a `vX.Y.Z` tag on main, and `.github/workflows/release.yml` publish
 to npm from it, with trusted publishing (no stored token) and a provenance attestation. The
 publish job runs only while the `NPM_PUBLISH` repository variable is `true`; otherwise a tag
 runs the checks and packs the tarball, and nothing is published, so a green tag run is not
-proof of a release. The
+proof of a release. After the publish, the same workflow attaches the tarball, `SHA256SUMS`
+and npm's provenance for it to the GitHub release for the tag, creating the release from the
+CHANGELOG section when there is none. The
 version bump is a pull request first: it sets `version` in `package.json` and
 `package-lock.json`, and moves the CHANGELOG's Unreleased section to `[X.Y.Z]`. A release is
 never re-tagged: a bad one gets a new patch version.
@@ -97,8 +99,8 @@ Keep pull requests focused: one change, with its tests and docs.
 
 ## Reporting bugs
 
-Open an issue with what you ran, what happened and what you expected, plus your Node
-version and OS. Never paste an access token, API key or password.
+Open an issue with the bug report form: what you ran, what happened and what you expected,
+plus the package and Node versions. Never paste an access token, API key or password.
 
 For anything security-relevant, do not open an issue. See [SECURITY.md](SECURITY.md).
 

@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest a change to the engine or the CLI.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The change you propose
+      description: What the engine or CLI would do differently. A sketch of the API is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways you tried or thought about, if any.
