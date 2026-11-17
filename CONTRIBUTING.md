@@ -39,6 +39,21 @@ dependency review, zizmor on the workflows, gitleaks on the history, and a licen
 over `package-lock.json` (`node .github/scripts/check-licenses.mjs --self-test`, then
 without the flag, runs it locally).
 
+## Style
+
+Code follows typescript-eslint's recommended type-checked rules on top of ESLint's
+recommended rules, configured in `eslint.config.js`, and TypeScript's `strict` mode
+(`tsconfig.json`). CI runs both (`npm run lint`, `npm run typecheck`), lint fails on any
+warning (`--max-warnings 0`), and a use of a deprecated API is an error
+(`@typescript-eslint/no-deprecated`). A pull request that fails either does not merge.
+`.editorconfig` sets the whitespace.
+
+## Tests
+
+A pull request that adds or changes functionality adds tests for it to the automated suite
+(`npm test`), and a bug fix adds a test that fails without the fix. CI runs the suite on
+every pull request and every push to main, and it is a required check.
+
 ## Coverage is 100 percent
 
 Every source file under `src/` (test files aside) is held at 100 percent line, branch, function and statement coverage,
@@ -79,7 +94,9 @@ A release is a `vX.Y.Z` tag on main, and `.github/workflows/release.yml` publish
 to npm from it, with trusted publishing (no stored token) and a provenance attestation. The
 publish job runs only while the `NPM_PUBLISH` repository variable is `true`; otherwise a tag
 runs the checks and packs the tarball, and nothing is published, so a green tag run is not
-proof of a release. The
+proof of a release. After the publish, the same workflow attaches the tarball, `SHA256SUMS`
+and npm's provenance for it to the GitHub release for the tag, creating the release from the
+CHANGELOG section when there is none. The
 version bump is a pull request first: it sets `version` in `package.json` and
 `package-lock.json`, and moves the CHANGELOG's Unreleased section to `[X.Y.Z]`. A release is
 never re-tagged: a bad one gets a new patch version.
@@ -93,12 +110,16 @@ There is no Developer Certificate of Origin sign-off requirement. By opening a p
 request you agree that your contribution is licensed under the Apache License, Version
 2.0, as section 5 of that licence describes.
 
-Keep pull requests focused: one change, with its tests and docs.
+Keep pull requests focused: one change, with its tests and docs. Documentation moves with
+the code: a change in behaviour updates README.md, ARCHITECTURE.md, SECURITY-MODEL.md or
+SECURITY.md in the same pull request when it changes what they say. How changes are
+reviewed and accepted is in the organization's
+[GOVERNANCE.md](https://github.com/distronode-corporation/.github/blob/main/GOVERNANCE.md).
 
 ## Reporting bugs
 
-Open an issue with what you ran, what happened and what you expected, plus your Node
-version and OS. Never paste an access token, API key or password.
+Open an issue with the bug report form: what you ran, what happened and what you expected,
+plus the package and Node versions. Never paste an access token, API key or password.
 
 For anything security-relevant, do not open an issue. See [SECURITY.md](SECURITY.md).
 

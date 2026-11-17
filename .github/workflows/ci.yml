@@ -3,7 +3,8 @@ name: CI
 # The gate every change to main passes, and the gate release.yml runs again on a tagged
 # commit (it calls this file as a reusable workflow, so the two cannot drift):
 #   lint        eslint with typescript-eslint's recommended type-checked rules.
-#   typecheck   tsc --noEmit over the sources, the tests and the vitest config.
+#   typecheck   tsc --noEmit over the sources, the tests and the vitest config, then the
+#               build, built twice to check the packed tarball is the same bytes.
 #   test        vitest with coverage, whose thresholds in vitest.config.ts fail the job below
 #               100 percent per file. It runs twice: on .nvmrc's version as `test`, the
 #               check the ruleset requires, and on Node 22, the oldest line package.json's
@@ -75,6 +76,15 @@ jobs:
       - run: npm run typecheck
       # The package release.yml publishes is this build; it must compile too.
       - run: npm run build
+      # The build is repeatable: a second build from the same commit packs to the same bytes.
+      - name: repeatable build
+        run: |
+          mkdir -p "$RUNNER_TEMP/first" "$RUNNER_TEMP/second"
+          npm pack --pack-destination "$RUNNER_TEMP/first"
+          rm -rf dist
+          npm run build
+          npm pack --pack-destination "$RUNNER_TEMP/second"
+          cmp "$RUNNER_TEMP"/first/*.tgz "$RUNNER_TEMP"/second/*.tgz
 
   test:
     # The ruleset requires a check named exactly `test`, so the .nvmrc leg keeps that name

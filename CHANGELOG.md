@@ -12,6 +12,24 @@ in the version bump, before the tag.
 
 ## [Unreleased]
 
+### Added
+
+- Release assets. A tag's release workflow now attaches the npm tarball, `SHA256SUMS` and the
+  provenance npm recorded for it (`.sigstore.json` and `.intoto.jsonl`) to the GitHub
+  release, and SECURITY.md says how to verify them.
+- Community health files: issue forms, a pull request template and SUPPORT.md, plus a threat
+  model in SECURITY.md and badges in the README.
+- ARCHITECTURE.md (the parts of the engine, the pipeline and where state lives) and
+  SECURITY-MODEL.md (threat model, trust boundaries, secure design principles and the
+  weaknesses the code counters). The README gains a quick start and uninstall steps, and
+  CONTRIBUTING.md states the style and test rules a change is held to.
+- CI checks that the build is repeatable: a second build from the same commit packs to the
+  same bytes.
+
+### Changed
+
+- Lint fails on any warning, and a use of a deprecated API is a lint error.
+
 ## [0.1.0] - 2026-11-16
 
 The first release. The npm package is the engine: ES modules with TypeScript declarations,
