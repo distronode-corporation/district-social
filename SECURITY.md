@@ -45,7 +45,19 @@ gh attestation verify district-social-X.Y.Z.tgz --digest-alg sha512 \
   --bundle district-social-X.Y.Z.sigstore.json --repo distronode-corporation/district-social
 ```
 
-`npm audit signatures` checks the same provenance for an installed copy.
+For an installed copy, npm checks the registry signature and the provenance attestation of
+every package in the tree:
+
+```
+npm install district-social
+npm audit signatures
+```
+
+It reports the packages with a verified registry signature and those with a verified
+attestation, and fails on an invalid one. The registry's public keys are at
+<https://registry.npmjs.org/-/npm/v1/keys>. The provenance is signed with a short-lived
+Sigstore certificate issued to `.github/workflows/release.yml` for the tag's commit, so there
+is no long-lived signing key to publish or to leak.
 
 ## Threat model
 

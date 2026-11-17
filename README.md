@@ -24,6 +24,25 @@ The platform ids are `ALL_PLATFORMS` in `src/types.ts`, and the per-network limi
 conventions are `SPECS` in `src/specs.ts`. A network publishes only when its transport is
 registered and its credentials resolve.
 
+## Quick start
+
+With Node.js 22 or later, install the engine and measure a post against two networks' limits,
+with no model and no credentials:
+
+```
+npm install district-social
+node --input-type=module -e '
+import { SPECS, vendorLength } from "district-social";
+const text = "We shipped dark mode.";
+for (const p of ["bluesky", "twitter"]) console.log(p, vendorLength(p, text), "of", SPECS[p].maxChars);
+'
+```
+
+That prints each network's count of the text, measured the way that network counts, against
+its limit (`bluesky 21 of 300`, `twitter 21 of 280`).
+
+Using the engine, below, goes on to formatting, QA and publishing.
+
 ## Install
 
 With Node.js 22 or later:
@@ -41,6 +60,21 @@ cd district-social
 npm ci
 npm run build    # emits dist/, the package entry point
 ```
+
+To check that the package you installed is the one this repository's release workflow
+built, see Verifying a release in [SECURITY.md](https://github.com/distronode-corporation/district-social/blob/main/SECURITY.md#verifying-a-release).
+
+## Uninstall
+
+The package installs nothing outside `node_modules` and writes no files of its own:
+
+```
+npm uninstall district-social
+```
+
+For a clone, delete the directory. The CLI's `scripts/social/config.json`, if you created one,
+is inside it. Anything the engine stored through your ports (drafts, credentials, media) is in
+your application's stores, and is removed there.
 
 ## Using the engine
 
@@ -97,9 +131,12 @@ and a refusal or truncated reply throws) as `llm`.
 
 ## Project
 
+- [ARCHITECTURE.md](https://github.com/distronode-corporation/district-social/blob/main/ARCHITECTURE.md): the parts of the engine, how a post moves through them, and where state lives.
+- [SECURITY-MODEL.md](https://github.com/distronode-corporation/district-social/blob/main/SECURITY-MODEL.md): the threat model, trust boundaries and the weaknesses the code counters.
 - [CONTRIBUTING.md](https://github.com/distronode-corporation/district-social/blob/main/CONTRIBUTING.md): how to run the local gate, and the rules for changes.
 - [SECURITY.md](https://github.com/distronode-corporation/district-social/blob/main/SECURITY.md): how to report a vulnerability privately.
 - [SUPPORT.md](https://github.com/distronode-corporation/district-social/blob/main/SUPPORT.md): where to ask a question or report a bug.
+- [GOVERNANCE.md](https://github.com/distronode-corporation/.github/blob/main/GOVERNANCE.md): who maintains the project and how a change is accepted.
 - [CHANGELOG.md](https://github.com/distronode-corporation/district-social/blob/main/CHANGELOG.md): what changed, release by release.
 
 Licensed under the [Apache License, Version 2.0](https://github.com/distronode-corporation/district-social/blob/main/LICENSE). Copyright 2026 Distronode
