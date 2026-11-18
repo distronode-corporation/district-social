@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe("fetchMediaBytes with a pinned dispatcher", () => {
   it("passes the guard's dispatcher and redirect policy to the fetch, then closes the dispatcher", async () => {
-    const dispatcher = { close: vi.fn(async () => {}) };
+    const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
     h.prepare.mockResolvedValue({ dispatcher, redirect: "error" });
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn<FetchFn>>;
     fetchMock.mockResolvedValue(new Response(new Uint8Array([7])));
@@ -44,10 +44,11 @@ describe("fetchMediaBytes with a pinned dispatcher", () => {
     expect(init.redirect).toBe("error");
     expect(init.dispatcher).toBe(dispatcher);
     expect(dispatcher.close).toHaveBeenCalledTimes(1);
+    expect(dispatcher.destroy).not.toHaveBeenCalled();
   });
 
-  it("closes the dispatcher when the fetch fails too", async () => {
-    const dispatcher = { close: vi.fn(async () => {}) };
+  it("destroys the dispatcher when the fetch fails", async () => {
+    const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
     h.prepare.mockResolvedValue({ dispatcher, redirect: "error" });
     // What undici throws for a 3xx under `redirect: "error"`.
     (fetch as unknown as ReturnType<typeof vi.fn<FetchFn>>).mockRejectedValue(new TypeError("unexpected redirect"));
@@ -55,7 +56,24 @@ describe("fetchMediaBytes with a pinned dispatcher", () => {
     await expect(fetchMediaBytes("x", URL_)).rejects.toThrow(
       `x: failed to fetch media asset (unexpected redirect): ${URL_}`,
     );
-    expect(dispatcher.close).toHaveBeenCalledTimes(1);
+    expect(dispatcher.destroy).toHaveBeenCalledTimes(1);
+    expect(dispatcher.close).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⛔ A refused status with a body still streaming: a graceful close would wait for
+   * that body, so the caller would hear nothing until the timeout.
+   */
+  it("destroys rather than closes the dispatcher after a non-2xx answer", async () => {
+    const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+    h.prepare.mockResolvedValue({ dispatcher, redirect: "error" });
+    (fetch as unknown as ReturnType<typeof vi.fn<FetchFn>>).mockResolvedValue(new Response("gone", { status: 404 }));
+
+    await expect(fetchMediaBytes("pinterest", URL_)).rejects.toThrow(
+      `pinterest: failed to fetch media asset (404): ${URL_}`,
+    );
+    expect(dispatcher.destroy).toHaveBeenCalledTimes(1);
+    expect(dispatcher.close).not.toHaveBeenCalled();
   });
 
   it("refuses before any request when the guard refuses the destination", async () => {

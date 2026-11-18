@@ -87,6 +87,7 @@ export async function fetchMediaBytes(
   const { dispatcher, redirect } = await preparePinnedHttpsFetch(url).catch((err: unknown) => {
     throw failed(err);
   });
+  let settled = false;
   try {
     let res: Response;
     try {
@@ -110,10 +111,13 @@ export async function fetchMediaBytes(
       const maxBytes = opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES;
       throw new Error(`${platform}: media asset exceeds the fetch byte cap (${maxBytes} bytes): ${url}`);
     }
+    settled = true;
     return capped.bytes;
   } finally {
-    // The pinned agent holds its own connection pool; one per fetch is closed with it.
-    await dispatcher?.close();
+    // The pinned agent holds its own connection pool, one per fetch. Closed gracefully
+    // after a body read to the end; destroyed after a failure, because a graceful close
+    // would wait for a refused body the host is still streaming.
+    await (settled ? dispatcher?.close() : dispatcher?.destroy());
   }
 }
 
