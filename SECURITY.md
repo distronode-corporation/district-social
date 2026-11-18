@@ -69,10 +69,9 @@ Each point names the code that holds it.
   literal host and on every resolved address) and returns an undici dispatcher pinned to
   the validated address, with redirects refused, so the request cannot be rebound or
   redirected into a private network. Inside the library it guards the Reddit media upload
-  to the endpoint Reddit's upload lease names (`src/reddit.ts`); it is exported for the
-  application's own fetches. Media asset URLs on a render are fetched by
-  `src/media-fetch.ts` without this guard, bounded in time and bytes only, so an
-  application that lets untrusted users set media URLs should validate them first.
+  to the endpoint Reddit's upload lease names (`src/reddit.ts`) and every media asset
+  fetch from a render's asset URL (`src/media-fetch.ts`), so an asset URL must be public
+  HTTPS that answers without a redirect; it is exported for the application's own fetches.
 - **Unbounded responses.** `src/read-capped.ts` reads an untrusted response body up to a
   byte cap and refuses, never truncates, a larger one: a declared `Content-Length` over the
   cap is refused before a byte is read, and a missing or lying one is caught while

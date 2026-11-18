@@ -186,6 +186,18 @@ export type BlueskyCredentialsResolver = () => Promise<BlueskyCredentials>;
 let _resolver: BlueskyCredentialsResolver | null = null;
 let _agent: Agent | null = null;
 let _loginPromise: Promise<Agent> | null = null;
+/**
+ * Bumped whenever the resolver or the session store is replaced. A session
+ * opened under an older generation is never cached, returned or persisted:
+ * the host has stopped using the credential or the store it was opened with.
+ */
+let _generation = 0;
+
+function invalidateSession(): void {
+  _generation++;
+  _agent = null;
+  _loginPromise = null;
+}
 
 /**
  * Register (or clear, with null) the resolver that supplies the app password.
@@ -198,8 +210,7 @@ let _loginPromise: Promise<Agent> | null = null;
  */
 export function setBlueskyCredentialsResolver(resolver: BlueskyCredentialsResolver | null): void {
   _resolver = resolver;
-  _agent = null;
-  _loginPromise = null;
+  invalidateSession();
 }
 
 /**
@@ -253,8 +264,7 @@ let _sessionStore: BlueskySessionStore | null = null;
 
 export function setBlueskySessionStore(store: BlueskySessionStore | null): void {
   _sessionStore = store;
-  _agent = null;
-  _loginPromise = null;
+  invalidateSession();
 }
 
 /**
@@ -271,14 +281,24 @@ export function setBlueskySessionStore(store: BlueskySessionStore | null): void 
  *
  * Single-flighted so concurrent callers on a cold process share one login
  * rather than each opening their own session.
+ *
+ * ⛔ Bound to the generation it started in. A resolver or store replaced while
+ * the session was opening makes it obsolete: it writes nothing to the store,
+ * is not cached, and every caller waiting on it is handed a session opened
+ * from the current resolver and store instead.
  */
 async function getAgent(): Promise<Agent> {
   if (_agent) return _agent;
   if (_loginPromise) return _loginPromise;
 
-  _loginPromise = (async () => {
+  const generation = _generation;
+  const store = _sessionStore;
+  const resolver = _resolver;
+  const current = () => generation === _generation;
+  // null: this attempt went obsolete, and its callers are handed the current pair's.
+  const pending = (async (): Promise<Agent | null> => {
     const { Agent, CredentialSession, XRPCError } = await atproto();
-    if (!_resolver) {
+    if (!resolver) {
       throw new BlueskyError(
         0,
         "no Bluesky credentials resolver registered (call setBlueskyCredentialsResolver)",
@@ -286,7 +306,7 @@ async function getAgent(): Promise<Agent> {
         "com.atproto.server.createSession",
       );
     }
-    const raw = await _resolver();
+    const raw = await resolver();
     // Normalise HERE, not only in whichever app wired the resolver. Every
     // consumer of this engine reaches Bluesky through getAgent(), including the
     // live proof test which reads process.env directly, so this is the one
@@ -315,7 +335,7 @@ async function getAgent(): Promise<Agent> {
     // keeps it and the next cold start still resumes.
     const identifierHash = blueskyIdentifierHash(creds.identifier);
     const session = new CredentialSession(new URL(SERVICE_URL), timeboxedFetch(), (evt, data) => {
-      if (!_sessionStore || evt === "network-error") return;
+      if (!store || evt === "network-error") return;
       const live = evt === "create" || evt === "update" ? data : undefined;
       const next: StoredBlueskySession | null = live ? { ...live, identifierHash } : null;
       // ⛔ `.then(() => save(...))`, NOT `Promise.resolve(save(...))`. The latter
@@ -325,7 +345,8 @@ async function getAgent(): Promise<Agent> {
       // the comment above says must never happen. An async store cannot do
       // this; a plain function that throws can.
       void Promise.resolve()
-        .then(() => _sessionStore!.save(next))
+        // The generation is read when the save runs: a replacement in between wins.
+        .then(() => (current() ? store.save(next) : undefined))
         .catch((err) => {
           console.warn("[bluesky] could not persist session:", err);
         });
@@ -334,8 +355,8 @@ async function getAgent(): Promise<Agent> {
     // ── Resume before logging in ────────────────────────────────────────────
     // The whole point of the store: a resume spends a refreshSession, a login
     // spends one of only TEN createSession calls per day.
-    let saved = _sessionStore
-      ? await _sessionStore.load().catch((err) => {
+    let saved = store
+      ? await store.load().catch((err) => {
           console.warn("[bluesky] could not read stored session:", err);
           return null;
         })
@@ -351,8 +372,10 @@ async function getAgent(): Promise<Agent> {
     if (saved && saved.identifierHash !== identifierHash) {
       console.warn("[bluesky] the stored session was not created for the configured identifier; dropping it and logging in");
       saved = null;
+      // Only while this attempt is current: an obsolete one would erase the
+      // row a newer credential just stored.
       await Promise.resolve()
-        .then(() => _sessionStore?.save(null))
+        .then(() => (current() ? store!.save(null) : undefined))
         .catch(() => {});
     }
 
@@ -386,10 +409,13 @@ async function getAgent(): Promise<Agent> {
         // that everything above it sees a BlueskyError (bar the refresh
         // failure just above, which is deliberate).
         await Promise.resolve()
-          .then(() => _sessionStore?.save(null))
+          .then(() => (current() ? store!.save(null) : undefined))
           .catch(() => {});
       }
     }
+
+    // Obsolete already: no createSession (ten a day) for a pair nobody uses.
+    if (!current()) return null;
 
     if (!session.hasSession) {
       try {
@@ -399,15 +425,28 @@ async function getAgent(): Promise<Agent> {
       }
     }
 
+    // The resolver or store changed while this session was opening: open one
+    // from the current pair instead of caching this one.
+    if (!current()) return null;
     const agent = new Agent(session);
     _agent = agent;
     return agent;
-  })();
+  })()
+    .catch((err: unknown) => {
+      // An obsolete attempt's failure is not the current pair's: its callers try that one.
+      if (!current()) return null;
+      throw err;
+    })
+    // Checked again here: a replacement can land after the attempt resolved and
+    // before this runs, and its callers must then get the current pair's Agent.
+    .then((agent) => (agent && current() ? agent : getAgent()));
+  _loginPromise = pending;
 
   try {
-    return await _loginPromise;
+    return await pending;
   } finally {
-    _loginPromise = null;
+    // Only our own: a newer generation's attempt may already be in flight.
+    if (_loginPromise === pending) _loginPromise = null;
   }
 }
 

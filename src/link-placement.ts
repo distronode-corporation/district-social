@@ -99,6 +99,19 @@ function ctaFor(seed: string): string {
 }
 
 /**
+ * `s` without a trailing ":", "-" or "–" and the whitespace either side of it,
+ * or `s` unchanged when it does not end in one: the output of
+ * `s.replace(/\s*[:\-–]\s*$/, "")` in one pass from the end. The regex is
+ * quadratic on a long whitespace run that is not at the end, because it retries
+ * the run from each of its positions; `trimEnd` drops the same characters `\s`
+ * matches.
+ */
+function dropTrailingDelimiter(s: string): string {
+  const trimmed = s.trimEnd();
+  return /[:\-–]$/.test(trimmed) ? trimmed.slice(0, -1).trimEnd() : s;
+}
+
+/**
  * Split EVERY link out of a body: returns the body without them plus the text
  * that should carry them elsewhere (a thread item or first comment), one line
  * per link line moved.
@@ -126,7 +139,7 @@ export function extractLink(content: string): { body: string; linkText: string }
       } else if (wholeLines && [...line].length <= 120) {
         moved.push(line.trim());
       } else {
-        kept.push(line.replace(URL_RE, "").replace(/\s*[:\-–]\s*$/, ""));
+        kept.push(dropTrailingDelimiter(line.replace(URL_RE, "")));
         // Non-null: hasUrl tested URL_RE's own source on this line.
         moved.push(line.match(URL_RE)!.join(" "));
       }

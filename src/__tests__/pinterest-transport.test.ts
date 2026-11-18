@@ -230,7 +230,7 @@ describe("pinterest transport", () => {
       // can only be consumed once.
       (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response(new Uint8Array([9])));
       createPinMock.mockResolvedValue({ id: "pin-2", boardId: "board-1" });
-      const images = [image({ url: "https://cdn/1.png" }), image({ url: "https://cdn/2.png" })];
+      const images = [image({ url: "https://cdn.example.com/1.png" }), image({ url: "https://cdn.example.com/2.png" })];
 
       await pinterestTransport.publishNow(input({ media: images }));
 
@@ -247,7 +247,7 @@ describe("pinterest transport", () => {
     it("caps uploads at 5 images even if more are attached", async () => {
       (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => new Response(new Uint8Array([1])));
       createPinMock.mockResolvedValue({ id: "pin-3", boardId: "board-1" });
-      const sixImages = Array.from({ length: 6 }, (_, i) => image({ url: `https://cdn/${i}.png` }));
+      const sixImages = Array.from({ length: 6 }, (_, i) => image({ url: `https://cdn.example.com/${i}.png` }));
 
       await pinterestTransport.publishNow(input({ media: sixImages }));
 

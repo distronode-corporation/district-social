@@ -173,6 +173,24 @@ describe("extractLink", () => {
     expect(out?.linkText).toBe("https://a.example/x https://b.example/y");
     expect(out?.body).not.toContain("https://");
   });
+
+  it("drops a long line's trailing delimiter exactly as the regex it replaced did", () => {
+    const tail = (line: string) => extractLink(`Intro\n${"word ".repeat(30)}${line}`)?.body.split("\n")[1];
+    expect(tail("see https://a.example/x")).toBe(`${"word ".repeat(30)}see`);
+    expect(tail("see: https://a.example/x")).toBe(`${"word ".repeat(30)}see`);
+    expect(tail("see \u2013 https://a.example/x")).toBe(`${"word ".repeat(30)}see`);
+    expect(tail("see - https://a.example/x and more")).toBe(`${"word ".repeat(30)}see - and more`);
+  });
+
+  it("is linear on a long whitespace run that does not end the line", () => {
+    // The old `/\s*[:\-–]\s*$/` retried the run from each of its positions:
+    // about two seconds for 50,000 spaces on V8.
+    const N = 50_000;
+    const start = performance.now();
+    const out = extractLink(`https://example.com x${" ".repeat(N)}y`);
+    expect(performance.now() - start).toBeLessThan(200);
+    expect(out?.linkText).toBe("https://example.com");
+  });
 });
 
 describe("trimHashtags", () => {

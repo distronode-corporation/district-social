@@ -37,6 +37,8 @@ const h = vi.hoisted(() => ({
   fetchImpls: [] as Array<typeof globalThis.fetch>,
   persistHandlers: [] as PersistHandler[],
   agentDid: undefined as string | undefined,
+  /** Runs inside every Agent constructor, so a test can act at that exact point. */
+  onAgent: undefined as (() => void) | undefined,
   login: vi.fn(),
   resumeSession: vi.fn(),
   detectFacets: vi.fn(),
@@ -85,7 +87,9 @@ vi.mock("@atproto/api", async (importOriginal) => {
   }
 
   class MockAgent {
-    constructor(public sessionManager: unknown) {}
+    constructor(public sessionManager: unknown) {
+      h.onAgent?.();
+    }
     get did() {
       return h.agentDid;
     }
@@ -157,6 +161,7 @@ beforeEach(() => {
   h.fetchImpls.length = 0;
   h.persistHandlers.length = 0;
   h.agentDid = "did:plc:testaccount000";
+  h.onAgent = undefined;
   // ⚠️ mockReset, not clearAllMocks: several tests seed a *Once queue and
   // clearAllMocks would leave it for the next test to inherit.
   h.login.mockReset().mockResolvedValue(undefined);
@@ -458,6 +463,150 @@ describe("the response byte cap", () => {
     } finally {
       fetchSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * ⛔ A rotated credential or a replaced store retires every session opened
+ * under the old pair, including one still opening when the swap happened.
+ * Caching it would keep publishing as an identity the host stopped using, and
+ * letting it write would clobber the row the new pair keeps.
+ */
+describe("a resolver or store replaced while the session is opening", () => {
+  const NEW_CREDS = { identifier: "new.example.com", password: "new-app-password" };
+  const ROW = { accessJwt: "a", refreshJwt: "r", handle: "h", did: "did:plc:test", active: true };
+
+  function gated(): { gate: Promise<void>; release: () => void } {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { gate, release };
+  }
+
+  it("does not cache the obsolete session and hands its callers one from the new resolver", async () => {
+    const { gate, release } = gated();
+    h.login.mockImplementationOnce(async () => {
+      await gate;
+    });
+
+    const pending = getProfile("did:plc:x");
+    await vi.waitFor(() => expect(h.login).toHaveBeenCalledTimes(1));
+    setBlueskyCredentialsResolver(async () => NEW_CREDS);
+    release();
+    await pending;
+    await getProfile("did:plc:x");
+
+    expect(h.login.mock.calls).toEqual([[CREDS], [NEW_CREDS]]);
+  });
+
+  it("hands the callers of an obsolete attempt that FAILED a session from the new resolver", async () => {
+    const { gate, release } = gated();
+    h.login.mockImplementationOnce(async () => {
+      await gate;
+      throw new XRPCError(401, "AuthenticationRequired", "Invalid identifier or password");
+    });
+
+    const pending = getProfile("did:plc:x");
+    await vi.waitFor(() => expect(h.login).toHaveBeenCalledTimes(1));
+    setBlueskyCredentialsResolver(async () => NEW_CREDS);
+    release();
+
+    await expect(pending).resolves.toBeDefined();
+    expect(h.login.mock.calls).toEqual([[CREDS], [NEW_CREDS]]);
+  });
+
+  it("hands no caller an Agent whose pair was replaced after the attempt finished", async () => {
+    // The swap is queued from inside the Agent constructor, after the attempt's
+    // last generation check, so it runs once the attempt has resolved but
+    // before the completion handler hands the Agent to its callers.
+    h.onAgent = () => {
+      h.onAgent = undefined;
+      queueMicrotask(() => setBlueskyCredentialsResolver(async () => NEW_CREDS));
+    };
+
+    await getProfile("did:plc:x");
+
+    expect(h.login.mock.calls).toEqual([[CREDS], [NEW_CREDS]]);
+    // The Agent the call used is the one opened for the new resolver.
+    expect(h.getProfile.mock.contexts).toHaveLength(1);
+    const used = h.getProfile.mock.contexts[0] as { sessionManager: unknown };
+    expect(h.persistHandlers).toHaveLength(2);
+    expect((used.sessionManager as { persistSession?: unknown }).persistSession).toBe(h.persistHandlers[1]);
+  });
+
+  it("drops a save that was queued before the store was replaced", async () => {
+    const oldSave = vi.fn(async () => {});
+    setBlueskySessionStore({ load: async () => null, save: oldSave });
+    await openSession();
+
+    // The callback queues the save; the replacement lands before it runs.
+    h.persistHandlers[0]("update", ROW);
+    setBlueskySessionStore({ load: async () => null, save: async () => {} });
+    await flushMicrotasks();
+
+    expect(oldSave).not.toHaveBeenCalled();
+  });
+
+  it("lets an obsolete session persist nothing, to the old store or the new one", async () => {
+    const oldSave = vi.fn(async () => {});
+    setBlueskySessionStore({ load: async () => null, save: oldSave });
+    await openSession();
+    const persist = h.persistHandlers[0];
+
+    const newSave = vi.fn(async () => {});
+    setBlueskySessionStore({ load: async () => null, save: newSave });
+    persist("update", ROW);
+    await flushMicrotasks();
+
+    expect(oldSave).not.toHaveBeenCalled();
+    expect(newSave).not.toHaveBeenCalled();
+  });
+
+  it("does not drop the row a new credential stored when the obsolete one finds it foreign", async () => {
+    const { gate, release } = gated();
+    const row = { ...ROW, identifierHash: blueskyIdentifierHash(NEW_CREDS.identifier) };
+    const save = vi.fn(async () => {});
+    const load = vi
+      .fn<() => Promise<typeof row>>()
+      .mockImplementationOnce(async () => {
+        await gate;
+        return row;
+      })
+      .mockImplementation(async () => row);
+    setBlueskySessionStore({ load, save });
+
+    const pending = getProfile("did:plc:x");
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    setBlueskyCredentialsResolver(async () => NEW_CREDS);
+    release();
+    await pending;
+
+    expect(save).not.toHaveBeenCalled();
+    // The new credential resumed its own row instead of spending a login.
+    expect(h.resumeSession).toHaveBeenCalledTimes(1);
+    expect(h.login).not.toHaveBeenCalled();
+  });
+
+  it("does not clear the new store when the obsolete session's refresh is refused", async () => {
+    const { gate, release } = gated();
+    h.resumeSession.mockImplementationOnce(async () => {
+      await gate;
+      throw new Error("ExpiredToken");
+    });
+    const oldSave = vi.fn(async () => {});
+    setBlueskySessionStore({ load: async () => ({ ...ROW, identifierHash: CREDS_HASH }), save: oldSave });
+
+    const pending = getProfile("did:plc:x");
+    await vi.waitFor(() => expect(h.resumeSession).toHaveBeenCalledTimes(1));
+    const newSave = vi.fn(async () => {});
+    setBlueskySessionStore({ load: async () => null, save: newSave });
+    release();
+    await pending;
+
+    expect(oldSave).not.toHaveBeenCalled();
+    expect(newSave).not.toHaveBeenCalled();
+    expect(h.login).toHaveBeenCalledTimes(1);
   });
 });
 
