@@ -62,15 +62,24 @@ export function youtubeSafeText(text: string): string {
 /** Description cap is in BYTES, not characters. PROVEN, developers.google.com/youtube/v3/docs/videos (snippet.description). */
 export const YOUTUBE_DESCRIPTION_MAX_BYTES = 5000;
 
-/** UTF-8-byte-safe truncation: trims whole Unicode code points, never splitting one, until the encoded byte length fits. */
+/**
+ * UTF-8-byte-safe truncation: the longest prefix of whole Unicode code points,
+ * never splitting one, whose encoded byte length fits.
+ *
+ * One pass that stops once the budget is spent. Re-encoding the remaining text
+ * after dropping each code point from the end was quadratic in the input.
+ */
 function truncateUtf8Bytes(text: string, maxBytes: number): string {
   const encoder = new TextEncoder();
   if (encoder.encode(text).byteLength <= maxBytes) return text;
-  const codePoints = Array.from(text);
-  while (codePoints.length > 0 && encoder.encode(codePoints.join("")).byteLength > maxBytes) {
-    codePoints.pop();
+  let bytes = 0;
+  let end = 0;
+  for (const codePoint of text) {
+    bytes += encoder.encode(codePoint).byteLength;
+    if (bytes > maxBytes) break;
+    end += codePoint.length;
   }
-  return codePoints.join("");
+  return text.slice(0, end);
 }
 
 /**

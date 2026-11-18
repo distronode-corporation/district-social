@@ -13,6 +13,8 @@ import {
   getVideos,
   deleteVideo,
   getMyChannel,
+  youtubeDescription,
+  YOUTUBE_DESCRIPTION_MAX_BYTES,
 } from "../youtube.js";
 
 const TOKEN = "test-access-token";
@@ -279,5 +281,24 @@ describe("youtube client", () => {
       );
       await expect(getMyChannel()).rejects.toBeInstanceOf(YouTubeError);
     });
+  });
+});
+
+describe("youtubeDescription", () => {
+  it("keeps the longest prefix of whole code points that fits the byte cap", () => {
+    // 4999 one-byte characters leave one byte, which a 4-byte emoji does not fit.
+    expect(youtubeDescription(`${"a".repeat(4999)}\u{1F680}b`)).toBe("a".repeat(4999));
+    // 4996 + 4 is exactly the cap, so the emoji stays and the next byte goes.
+    expect(youtubeDescription(`${"a".repeat(4996)}\u{1F680}b`)).toBe(`${"a".repeat(4996)}\u{1F680}`);
+    expect(youtubeDescription("short")).toBe("short");
+  });
+
+  it("is linear in the input length", () => {
+    // Re-encoding the remaining text after each dropped code point took about
+    // two seconds for 20,000 characters on V8.
+    const start = performance.now();
+    const out = youtubeDescription("a".repeat(20_000));
+    expect(performance.now() - start).toBeLessThan(200);
+    expect(out).toBe("a".repeat(YOUTUBE_DESCRIPTION_MAX_BYTES));
   });
 });
