@@ -29,6 +29,16 @@ in the version bump, before the tag.
 ### Changed
 
 - Lint fails on any warning, and a use of a deprecated API is a lint error.
+- Media asset fetches go through the SSRF guard (`src/ssrf.ts`): an asset URL must be
+  public HTTPS, the connection is pinned to the address that was checked, and a redirect is
+  refused rather than followed.
+
+### Fixed
+
+- A Bluesky session still opening when the credentials resolver or the session store is
+  replaced is no longer cached or returned, and no longer writes to the store.
+- Linear time on long input: the trailing delimiter trim when a link leaves a long line, the
+  fabricated-testimonial check, and the YouTube description's byte truncation.
 
 ## [0.1.0] - 2026-11-16
 
