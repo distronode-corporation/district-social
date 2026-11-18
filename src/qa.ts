@@ -867,8 +867,10 @@ function complianceSurfaces(draft: Draft): TextSurface[] {
 // --- Gate 1: fabricated-testimonial ---------------------------------------
 function detectFabricatedTestimonial(text: string): boolean {
   // A quote attributed via a dash to a named role: `"..." - Sarah, dental office manager`.
+  // No `\s*` after the comma: `[\w\s-]*` already takes that whitespace, and two
+  // adjacent runs that can both take it backtrack quadratically on a long one.
   const quoteDashRole =
-    /["“][^"”]{4,}["”]\s*[-–—]\s*[a-z][\w.'-]*(\s+[\w.'-]+){0,3}\s*,\s*[\w\s-]*\b(dental|dentist|office|clinic|practice|salon|spa|restaurant|hotel|manager|owner|founder|director|ceo|receptionist|doctor|nurse|admin(istrator)?|coordinator|customer|client|patient|realtor|business|entrepreneur|shop)\b/i;
+    /["“][^"”]{4,}["”]\s*[-–—]\s*[a-z][\w.'-]*(\s+[\w.'-]+){0,3}\s*,[\w\s-]*\b(dental|dentist|office|clinic|practice|salon|spa|restaurant|hotel|manager|owner|founder|director|ceo|receptionist|doctor|nurse|admin(istrator)?|coordinator|customer|client|patient|realtor|business|entrepreneur|shop)\b/i;
   // A quote attributed via a dash to a capitalised name + comma: `"..." - Sarah, ...`.
   // Case-sensitive on the leading capital ON PURPOSE, to separate a real name
   // attribution from an ordinary dashed clause after a quote. This only adds

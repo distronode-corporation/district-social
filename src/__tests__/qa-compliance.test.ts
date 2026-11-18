@@ -70,6 +70,22 @@ describe("complianceChecks", () => {
         codes(draftText('Meet your new "AI receptionist" that answers every call.')),
       ).not.toContain("fabricated-testimonial");
     });
+
+    it("still flags a role attribution with whitespace after the comma", () => {
+      expect(codes(draftText('"It answers every call for us." - sarah,   \t office manager'))).toContain(
+        "fabricated-testimonial",
+      );
+    });
+
+    it("is linear on a long whitespace run after an attribution comma that names no role", () => {
+      // Two adjacent runs that could both take the whitespace backtracked
+      // quadratically: about four seconds for 50,000 spaces on V8.
+      const text = `"It answers every call." - sarah,${" ".repeat(50_000)}!`;
+      const start = performance.now();
+      const found = codes(draftText(text));
+      expect(performance.now() - start).toBeLessThan(200);
+      expect(found).not.toContain("fabricated-testimonial");
+    });
   });
 
   describe("gate 2: compliance-language (fail)", () => {
