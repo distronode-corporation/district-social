@@ -13,8 +13,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/distronode-corporation/district-social/blob/main/LICENSE)
 [![CI](https://github.com/distronode-corporation/district-social/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/distronode-corporation/district-social/actions/workflows/ci.yml?query=branch%3Amain)
 
-**One post in, a checked render for each of ten social networks out, published only once a
-person has approved it.**
+**One post in, a checked render for each of ten social networks out, built to publish only
+what a person approved, with that approval enforced by your application.**
 
 <img alt="A terminal: a six-line script imports district-social and prints, for one post with an emoji and a link, its length as each of the ten networks counts it against that network's limit: 47 of 280 on X, 57 of 300 on Bluesky, 58 on most others, 60 on YouTube" src=".github/assets/measure.png" width="720">
 
