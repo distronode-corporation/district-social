@@ -84,4 +84,61 @@ describe("fetchMediaBytes with a pinned dispatcher", () => {
     );
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  /**
+   * ⛔ ONE DEADLINE COVERS THE WHOLE FETCH, the destination lookup included. A lookup
+   * that outlives `timeoutMs` fails the call as a timeout, sends no request, and the
+   * dispatcher it builds afterwards is destroyed, since nobody else holds it.
+   */
+  describe("a destination lookup that outlives the deadline", () => {
+    function late<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void } {
+      let resolve!: (v: T) => void;
+      let reject!: (e: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+
+    it("times out, sends no request, and destroys the dispatcher the late lookup builds", async () => {
+      const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+      const prep = late<unknown>();
+      h.prepare.mockReturnValue(prep.promise);
+      (fetch as unknown as ReturnType<typeof vi.fn<FetchFn>>).mockResolvedValue(new Response(new Uint8Array([7])));
+
+      const call = fetchMediaBytes("x", URL_, { timeoutMs: 20 });
+      await expect(call).rejects.toThrow(`x: failed to fetch media asset (timed out after 0.02s): ${URL_}`);
+      expect(fetch).not.toHaveBeenCalled();
+
+      prep.resolve({ dispatcher, redirect: "error" });
+      await vi.waitFor(() => expect(dispatcher.destroy).toHaveBeenCalledTimes(1));
+      expect(dispatcher.close).not.toHaveBeenCalled();
+    });
+
+    it("lets a late lookup with no dispatcher, or one whose destroy fails, end quietly", async () => {
+      const failing = { close: vi.fn(async () => {}), destroy: vi.fn(async () => Promise.reject(new Error("gone"))) };
+      const first = late<unknown>();
+      const second = late<unknown>();
+      h.prepare.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+      await expect(fetchMediaBytes("x", URL_, { timeoutMs: 10 })).rejects.toThrow("timed out after 0.01s");
+      await expect(fetchMediaBytes("x", URL_, { timeoutMs: 10 })).rejects.toThrow("timed out after 0.01s");
+      first.resolve({ dispatcher: undefined, redirect: undefined });
+      second.resolve({ dispatcher: failing, redirect: "error" });
+
+      await vi.waitFor(() => expect(failing.destroy).toHaveBeenCalledTimes(1));
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("ignores a lookup that fails after the deadline", async () => {
+      const prep = late<unknown>();
+      h.prepare.mockReturnValue(prep.promise);
+
+      await expect(fetchMediaBytes("x", URL_, { timeoutMs: 10 })).rejects.toThrow("timed out after 0.01s");
+      prep.reject(new Error("SSRF guard: late refusal"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
 });

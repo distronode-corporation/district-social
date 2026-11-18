@@ -84,15 +84,30 @@ export async function fetchMediaBytes(
     const why = timedOut ? `timed out after ${timeoutMs / 1000}s` : getErrorMessage(err);
     return new Error(`${platform}: failed to fetch media asset (${why}): ${url}`);
   };
-  const { dispatcher, redirect } = await preparePinnedHttpsFetch(url).catch((err: unknown) => {
+  // ⛔ One deadline for the whole call: the destination lookup, the fetch and the
+  // body read. A lookup that outlives it fails the call as a timeout, and the
+  // dispatcher it builds afterwards is destroyed, since nobody else holds it.
+  const signal = AbortSignal.timeout(timeoutMs);
+  const preparing = preparePinnedHttpsFetch(url);
+  const deadline = new Promise<"timeout">((resolve) => {
+    signal.addEventListener("abort", () => resolve("timeout"), { once: true });
+  });
+  const prepared = await Promise.race([preparing, deadline]).catch((err: unknown) => {
     throw failed(err);
   });
+  if (prepared === "timeout") {
+    preparing
+      .then((late) => late.dispatcher?.destroy(), () => {})
+      .catch(() => {});
+    throw failed(signal.reason);
+  }
+  const { dispatcher, redirect } = prepared;
   let settled = false;
   try {
     let res: Response;
     try {
       res = await fetch(url, {
-        signal: AbortSignal.timeout(timeoutMs),
+        signal,
         // Both present in production; both undefined under NODE_ENV==="test",
         // where preparePinnedHttpsFetch skips DNS.
         ...(redirect ? { redirect } : {}),
