@@ -20,10 +20,13 @@ person has approved it.**
 
 *Real output of the script shown, run against district-social 0.1.0 from npm.*
 
-```
+```sh
 npm install district-social
-node --input-type=module -e 'import { SPECS, vendorLength } from "district-social"; console.log(vendorLength("bluesky", "We shipped dark mode."), "of", SPECS.bluesky.maxChars)'
-# 21 of 300
+```
+
+```js
+import { vendorLength } from "district-social";
+console.log(vendorLength("twitter", "Dark mode: https://example.com/blog")); // 34 (a link is 23 on X)
 ```
 
 Made by [Distronode](https://distronode.com) · more open source at
