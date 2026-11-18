@@ -18,7 +18,7 @@ person has approved it.**
 
 <img alt="A terminal: a six-line script imports district-social and prints, for one post with an emoji and a link, its length as each of the ten networks counts it against that network's limit: 47 of 280 on X, 57 of 300 on Bluesky, 58 on most others, 60 on YouTube" src=".github/assets/measure.png" width="720">
 
-*Real output of the script shown, run against district-social 0.1.0 from npm.*
+*Real output of the script shown, run against district-social 0.1.0 from npm. X counts a link as 23 characters, whatever its length.*
 
 ```sh
 npm install district-social
@@ -26,7 +26,7 @@ npm install district-social
 
 ```js
 import { vendorLength } from "district-social";
-console.log(vendorLength("twitter", "Dark mode: https://example.com/blog")); // 34 (a link is 23 on X)
+console.log(vendorLength("twitter", "Dark mode: https://example.com/blog")); // 34
 ```
 
 Made by [Distronode](https://distronode.com) · more open source at
