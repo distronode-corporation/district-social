@@ -16,11 +16,18 @@
  * publish failure alert can group on. The platform label is an argument so
  * every transport keeps its exact message byte for byte.
  *
+ * ⛔ THE DESTINATION IS CHECKED AND PINNED (`./ssrf.ts`): HTTPS only, every
+ * resolved address public, the connection made to the address that was
+ * checked, and no redirects followed. An asset URL, or the host behind it, can
+ * otherwise point the fetch at the publishing process's own network.
+ *
  * Relative imports only, like the rest of this folder: read-capped.ts lives in
  * the engine, and the app may re-export it.
  */
 
+import type { Agent as UndiciAgent } from "undici";
 import { readCappedBody } from "./read-capped.js";
+import { preparePinnedHttpsFetch } from "./ssrf.js";
 import { getErrorMessage } from "./error-message.js";
 import { PublishPreflightError } from "./publish.js";
 import type { MediaAsset } from "./types.js";
@@ -55,8 +62,9 @@ export interface MediaFetchOptions {
  * A render asset's bytes, fetched with a timeout and a byte cap.
  *
  * Throws the platform-prefixed fetch error on a non-2xx answer (the exact
- * text the transports always threw, byte for byte) and a platform-prefixed cap
- * error when the response declares or streams more than `maxBytes`.
+ * text the transports always threw, byte for byte), on a destination the SSRF
+ * guard refuses and on a redirect, and a platform-prefixed cap error when the
+ * response declares or streams more than `maxBytes`.
  */
 export async function fetchMediaBytes(
   platform: string,
@@ -76,23 +84,37 @@ export async function fetchMediaBytes(
     const why = timedOut ? `timed out after ${timeoutMs / 1000}s` : getErrorMessage(err);
     return new Error(`${platform}: failed to fetch media asset (${why}): ${url}`);
   };
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-  } catch (err) {
-    throw failed(err);
-  }
-  if (!res.ok) {
-    throw new Error(`${platform}: failed to fetch media asset (${res.status}): ${url}`);
-  }
-  const capped = await readCappedBody(res, opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES).catch((err: unknown) => {
+  const { dispatcher, redirect } = await preparePinnedHttpsFetch(url).catch((err: unknown) => {
     throw failed(err);
   });
-  if (!capped.ok) {
-    const maxBytes = opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES;
-    throw new Error(`${platform}: media asset exceeds the fetch byte cap (${maxBytes} bytes): ${url}`);
+  try {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+        // Both present in production; both undefined under NODE_ENV==="test",
+        // where preparePinnedHttpsFetch skips DNS.
+        ...(redirect ? { redirect } : {}),
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit & { dispatcher?: UndiciAgent });
+    } catch (err) {
+      throw failed(err);
+    }
+    if (!res.ok) {
+      throw new Error(`${platform}: failed to fetch media asset (${res.status}): ${url}`);
+    }
+    const capped = await readCappedBody(res, opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES).catch((err: unknown) => {
+      throw failed(err);
+    });
+    if (!capped.ok) {
+      const maxBytes = opts.maxBytes ?? MEDIA_FETCH_MAX_BYTES;
+      throw new Error(`${platform}: media asset exceeds the fetch byte cap (${maxBytes} bytes): ${url}`);
+    }
+    return capped.bytes;
+  } finally {
+    // The pinned agent holds its own connection pool; one per fetch is closed with it.
+    await dispatcher?.close();
   }
-  return capped.bytes;
 }
 
 /**
