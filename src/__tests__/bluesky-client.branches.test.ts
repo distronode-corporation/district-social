@@ -495,6 +495,35 @@ describe("a resolver or store replaced while the session is opening", () => {
     expect(h.login.mock.calls).toEqual([[CREDS], [NEW_CREDS]]);
   });
 
+  it("hands the callers of an obsolete attempt that FAILED a session from the new resolver", async () => {
+    const { gate, release } = gated();
+    h.login.mockImplementationOnce(async () => {
+      await gate;
+      throw new XRPCError(401, "AuthenticationRequired", "Invalid identifier or password");
+    });
+
+    const pending = getProfile("did:plc:x");
+    await vi.waitFor(() => expect(h.login).toHaveBeenCalledTimes(1));
+    setBlueskyCredentialsResolver(async () => NEW_CREDS);
+    release();
+
+    await expect(pending).resolves.toBeDefined();
+    expect(h.login.mock.calls).toEqual([[CREDS], [NEW_CREDS]]);
+  });
+
+  it("drops a save that was queued before the store was replaced", async () => {
+    const oldSave = vi.fn(async () => {});
+    setBlueskySessionStore({ load: async () => null, save: oldSave });
+    await openSession();
+
+    // The callback queues the save; the replacement lands before it runs.
+    h.persistHandlers[0]("update", ROW);
+    setBlueskySessionStore({ load: async () => null, save: async () => {} });
+    await flushMicrotasks();
+
+    expect(oldSave).not.toHaveBeenCalled();
+  });
+
   it("lets an obsolete session persist nothing, to the old store or the new one", async () => {
     const oldSave = vi.fn(async () => {});
     setBlueskySessionStore({ load: async () => null, save: oldSave });

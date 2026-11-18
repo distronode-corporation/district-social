@@ -295,7 +295,8 @@ async function getAgent(): Promise<Agent> {
   const store = _sessionStore;
   const resolver = _resolver;
   const current = () => generation === _generation;
-  const pending = (async (): Promise<Agent> => {
+  // null: this attempt went obsolete, and its callers are handed the current pair's.
+  const pending = (async (): Promise<Agent | null> => {
     const { Agent, CredentialSession, XRPCError } = await atproto();
     if (!resolver) {
       throw new BlueskyError(
@@ -334,7 +335,7 @@ async function getAgent(): Promise<Agent> {
     // keeps it and the next cold start still resumes.
     const identifierHash = blueskyIdentifierHash(creds.identifier);
     const session = new CredentialSession(new URL(SERVICE_URL), timeboxedFetch(), (evt, data) => {
-      if (!store || !current() || evt === "network-error") return;
+      if (!store || evt === "network-error") return;
       const live = evt === "create" || evt === "update" ? data : undefined;
       const next: StoredBlueskySession | null = live ? { ...live, identifierHash } : null;
       // ⛔ `.then(() => save(...))`, NOT `Promise.resolve(save(...))`. The latter
@@ -344,7 +345,8 @@ async function getAgent(): Promise<Agent> {
       // the comment above says must never happen. An async store cannot do
       // this; a plain function that throws can.
       void Promise.resolve()
-        .then(() => store.save(next))
+        // The generation is read when the save runs: a replacement in between wins.
+        .then(() => (current() ? store.save(next) : undefined))
         .catch((err) => {
           console.warn("[bluesky] could not persist session:", err);
         });
@@ -413,7 +415,7 @@ async function getAgent(): Promise<Agent> {
     }
 
     // Obsolete already: no createSession (ten a day) for a pair nobody uses.
-    if (!current()) return getAgent();
+    if (!current()) return null;
 
     if (!session.hasSession) {
       try {
@@ -425,11 +427,17 @@ async function getAgent(): Promise<Agent> {
 
     // The resolver or store changed while this session was opening: open one
     // from the current pair instead of caching this one.
-    if (!current()) return getAgent();
+    if (!current()) return null;
     const agent = new Agent(session);
     _agent = agent;
     return agent;
-  })();
+  })()
+    .catch((err: unknown) => {
+      // An obsolete attempt's failure is not the current pair's: its callers try that one.
+      if (!current()) return null;
+      throw err;
+    })
+    .then((agent) => agent ?? getAgent());
   _loginPromise = pending;
 
   try {
