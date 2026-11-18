@@ -37,6 +37,8 @@ const h = vi.hoisted(() => ({
   fetchImpls: [] as Array<typeof globalThis.fetch>,
   persistHandlers: [] as PersistHandler[],
   agentDid: undefined as string | undefined,
+  /** Runs inside every Agent constructor, so a test can act at that exact point. */
+  onAgent: undefined as (() => void) | undefined,
   login: vi.fn(),
   resumeSession: vi.fn(),
   detectFacets: vi.fn(),
@@ -85,7 +87,9 @@ vi.mock("@atproto/api", async (importOriginal) => {
   }
 
   class MockAgent {
-    constructor(public sessionManager: unknown) {}
+    constructor(public sessionManager: unknown) {
+      h.onAgent?.();
+    }
     get did() {
       return h.agentDid;
     }
@@ -157,6 +161,7 @@ beforeEach(() => {
   h.fetchImpls.length = 0;
   h.persistHandlers.length = 0;
   h.agentDid = "did:plc:testaccount000";
+  h.onAgent = undefined;
   // ⚠️ mockReset, not clearAllMocks: several tests seed a *Once queue and
   // clearAllMocks would leave it for the next test to inherit.
   h.login.mockReset().mockResolvedValue(undefined);
@@ -509,6 +514,25 @@ describe("a resolver or store replaced while the session is opening", () => {
 
     await expect(pending).resolves.toBeDefined();
     expect(h.login.mock.calls).toEqual([[CREDS], [NEW_CREDS]]);
+  });
+
+  it("hands no caller an Agent whose pair was replaced after the attempt finished", async () => {
+    // The swap is queued from inside the Agent constructor, after the attempt's
+    // last generation check, so it runs once the attempt has resolved but
+    // before the completion handler hands the Agent to its callers.
+    h.onAgent = () => {
+      h.onAgent = undefined;
+      queueMicrotask(() => setBlueskyCredentialsResolver(async () => NEW_CREDS));
+    };
+
+    await getProfile("did:plc:x");
+
+    expect(h.login.mock.calls).toEqual([[CREDS], [NEW_CREDS]]);
+    // The Agent the call used is the one opened for the new resolver.
+    expect(h.getProfile.mock.contexts).toHaveLength(1);
+    const used = h.getProfile.mock.contexts[0] as { sessionManager: unknown };
+    expect(h.persistHandlers).toHaveLength(2);
+    expect((used.sessionManager as { persistSession?: unknown }).persistSession).toBe(h.persistHandlers[1]);
   });
 
   it("drops a save that was queued before the store was replaced", async () => {

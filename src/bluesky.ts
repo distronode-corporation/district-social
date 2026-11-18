@@ -437,7 +437,9 @@ async function getAgent(): Promise<Agent> {
       if (!current()) return null;
       throw err;
     })
-    .then((agent) => agent ?? getAgent());
+    // Checked again here: a replacement can land after the attempt resolved and
+    // before this runs, and its callers must then get the current pair's Agent.
+    .then((agent) => (agent && current() ? agent : getAgent()));
   _loginPromise = pending;
 
   try {
