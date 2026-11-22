@@ -3,7 +3,8 @@
 The near-term plan for district-social, and what it will not do. It is taken from the
 repository's open issues and from what its own documents say is not finished yet. It covers
 the next twelve months, to November 2027. Items have no dates of their own: an item is done
-when the change that does it is merged and released, and it then leaves this list for [CHANGELOG.md](CHANGELOG.md). Anything here can change; open an
+when the change that does it is merged and released, and it then leaves this list for
+[CHANGELOG.md](CHANGELOG.md). Anything here can change; open an
 [issue](https://github.com/distronode-corporation/district-social/issues) to discuss an item or
 to propose a new one.
 
