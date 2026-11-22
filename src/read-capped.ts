@@ -52,7 +52,9 @@ export async function readCappedBody(res: Response, maxBytes: number): Promise<C
   }
   // A 204 is `ok` and has no body at all; it reads as an empty body.
   if (!res.body) return { ok: true, bytes: new Uint8Array(0) };
-  const reader = res.body.getReader();
+  // A fetch Response body is a stream of bytes (Fetch standard); Node types it as
+  // ReadableStream<any>.
+  const reader: ReadableStreamDefaultReader<Uint8Array> = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {

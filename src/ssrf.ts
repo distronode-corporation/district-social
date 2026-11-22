@@ -106,7 +106,7 @@ function expandIpv6(addr: string): number[] | null {
 
   const groupsStr = [
     ...head,
-    ...(halves.length === 2 ? Array(missing).fill("0") : []),
+    ...(halves.length === 2 ? Array<string>(missing).fill("0") : []),
     ...tail,
   ];
   const groups: number[] = [];

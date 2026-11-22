@@ -74,14 +74,13 @@ const SERVICE_URL = "https://bsky.social";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /**
- * The cap on any ONE Bluesky response body (a compensating control).
+ * The cap on any ONE Bluesky response body (defence in depth).
  *
- * The nested zod advisory (GHSA-mrhx-c7xc-m3w5) has no in-range fix: the
- * @atproto chain pins zod 3.x and the fix is only in 4.6.6, so the advisory
- * is accepted with this bound in place. What it names is memory
- * exhaustion from a crafted response, and this wrapper only ever dials the
- * hard-coded bsky.social AppView (SERVICE_URL above), so a byte cap on what a
- * response may hold in memory bounds exactly that vector.
+ * The nested zod advisory (GHSA-mrhx-c7xc-m3w5) is fixed by
+ * `overrides.zod` (4.6.6) in package.json. The cap stays: what the advisory
+ * named is memory exhaustion from a crafted response, and this wrapper only
+ * ever dials the hard-coded bsky.social AppView (SERVICE_URL above), so a
+ * byte cap on what a response may hold in memory bounds that whole class.
  *
  * Sized generously off the largest payload the callers legitimately read: a
  * 100-post searchPosts or 25-URI getPosts page is a few hundred KB of JSON,
@@ -144,7 +143,9 @@ const DEAD_REFRESH_ERRORS = new Set(["ExpiredToken", "InvalidToken", "InvalidDID
  */
 function isRefusedRefresh(err: unknown, xrpcError: AtprotoApi["XRPCError"]): boolean {
   if (!(err instanceof xrpcError)) return true;
-  return err.status === 401 || DEAD_REFRESH_ERRORS.has(err.error);
+  // XRPC types `status` as its numeric ResponseType enum; read as the number it is,
+  // as wrapError does.
+  return Number(err.status) === 401 || DEAD_REFRESH_ERRORS.has(err.error);
 }
 
 /**
