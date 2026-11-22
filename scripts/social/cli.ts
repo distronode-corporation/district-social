@@ -249,6 +249,51 @@ interface AccountRow {
   reason?: string;
 }
 
+/**
+ * The options commander hands each command's action. Commander types them as `any`; these
+ * are what the `.option()` calls below declare: a `<value>` option is a string, a
+ * `<value...>` option a list, a bare flag a boolean, and each is absent when not given.
+ */
+interface GlobalOptions {
+  baseUrl?: string;
+}
+
+interface JsonOption {
+  json?: boolean;
+}
+
+interface NewOptions extends JsonOption {
+  text?: string;
+  title?: string;
+  hashtags?: string;
+  link?: string;
+  notes?: string;
+  platforms?: string;
+  subreddit?: string;
+  board?: string;
+  media?: string[];
+  asset?: string[];
+  renders?: string;
+  spec?: string;
+}
+
+interface ListOptions extends JsonOption {
+  status?: string;
+  limit?: string;
+}
+
+interface PublishOptions extends JsonOption {
+  /** A required option: commander refuses the command without it. */
+  approvalId: string;
+  session?: string;
+}
+
+interface EvidenceOptions {
+  platform?: string;
+  since?: string;
+  limit?: string;
+}
+
 export function createProgram(deps: CliDeps = {}): Command {
   const program = new Command();
   program
@@ -261,7 +306,7 @@ export function createProgram(deps: CliDeps = {}): Command {
   const wireSecrets = deps.wireSecrets;
   if (wireSecrets) program.hook("preAction", () => wireSecrets());
 
-  const api = (): ApiClient => createApiClient(resolveApiSettings(deps, program.opts().baseUrl));
+  const api = (): ApiClient => createApiClient(resolveApiSettings(deps, program.opts<GlobalOptions>().baseUrl));
 
   program
     .command("new")
@@ -283,7 +328,7 @@ export function createProgram(deps: CliDeps = {}): Command {
         "assetIds, renders }; its files are relative to it, and flags override it",
     )
     .option("--json", "print the API's answer as JSON")
-    .action(async (o) => {
+    .action(async (o: NewOptions) => {
       const spec = o.spec ? readJson(o.spec) : {};
       const unknown = Object.keys(spec).filter((k) => !SPEC_FIELDS.has(k));
       if (unknown.length > 0) {
@@ -339,7 +384,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .option("--status <status>", "only this status (draft, approved, scheduled, published, failed)")
     .option("--limit <n>", "how many (1-200, default 50)")
     .option("--json", "print the API's answer as JSON")
-    .action(async (o) => {
+    .action(async (o: ListOptions) => {
       const query = new URLSearchParams();
       if (o.status) query.set("status", o.status);
       if (o.limit) query.set("limit", o.limit);
@@ -361,7 +406,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .command("show <id>")
     .description("Show a draft: per-platform renders, QA, legs, rendersHash, and its approvals (ids `publish` cites)")
     .option("--json", "print the API's answer as JSON")
-    .action(async (id, o) => {
+    .action(async (id: string, o: JsonOption) => {
       const view = await api().request<DraftView>("GET", `/drafts/${encodeURIComponent(id)}`);
       if (o.json) return json(view);
       printView(view);
@@ -371,7 +416,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .command("qa <id>")
     .description("Re-run the full QA on Social HQ and store it")
     .option("--json", "print the API's answer as JSON")
-    .action(async (id, o) => {
+    .action(async (id: string, o: JsonOption) => {
       const { qa } = await api().request<{ qa: QAReport }>("POST", `/drafts/${encodeURIComponent(id)}/qa`);
       if (o.json) return json(qa);
       console.log(renderQa(qa));
@@ -386,7 +431,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .requiredOption("--approval-id <uuid>", "the id of the approval a person's Approve created (`show` lists them)")
     .option("--session <id>", "your session id (default: CLAUDE_CODE_SESSION_ID)")
     .option("--json", "print the API's answer as JSON")
-    .action(async (id, o) => {
+    .action(async (id: string, o: PublishOptions) => {
       const sessionId = o.session ?? process.env.CLAUDE_CODE_SESSION_ID;
       if (!sessionId) throw new Error("publish needs --session <id> (or CLAUDE_CODE_SESSION_ID)");
       const out = await api().request<DraftView & { result: { sent: Array<{ platform: string }> }; approvalId: string }>(
@@ -408,7 +453,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .command("accounts")
     .description(`Publish-readiness of all ${ALL_PLATFORMS.length} platforms, on the route each one uses`)
     .option("--json", "print the API's answer as JSON")
-    .action(async (o) => {
+    .action(async (o: JsonOption) => {
       const { platforms } = await api().request<{ platforms: AccountRow[] }>("GET", "/accounts");
       if (o.json) return json(platforms);
       for (const p of platforms) {
@@ -426,7 +471,7 @@ export function createProgram(deps: CliDeps = {}): Command {
     .option("--platform <platform>", "list form: only this platform")
     .option("--since <iso>", "list form: sent at or after")
     .option("--limit <n>", "list form: how many (1-500, default 100)")
-    .action(async (id, o) => {
+    .action(async (id: string | undefined, o: EvidenceOptions) => {
       if (id) return json(await api().request("GET", `/drafts/${encodeURIComponent(id)}/evidence`));
       const query = new URLSearchParams();
       if (o.platform) query.set("platform", platformOf(o.platform));

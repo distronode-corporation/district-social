@@ -31,7 +31,6 @@ export default tseslint.config(
       // Off for now: rules the code was not written against. Each is on the tracking list to
       // turn back on once its findings are fixed.
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/require-await": "off",
