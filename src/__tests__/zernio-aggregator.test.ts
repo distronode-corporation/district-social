@@ -1107,7 +1107,14 @@ describe("analyticsPost", () => {
     await expect(zernioAggregator.analyticsPost!("reddit", "zp_missing~x")).resolves.toEqual({});
   });
 
-  it("drops non-numeric and non-finite values so a counters map stays numeric", async () => {
+  it("keeps numeric counters and leaves a null one out", async () => {
+    mockFetch(() => ({
+      json: { posts: [{ _id: "zp_1", platforms: [{ platform: "reddit", analytics: { likes: 5, impressions: null } }] }] },
+    }));
+    await expect(zernioAggregator.analyticsPost!("reddit", "zp_1~a")).resolves.toEqual({ likes: 5 });
+  });
+
+  it("refuses a report whose counter is not a number, rather than dropping it", async () => {
     mockFetch(() => ({
       json: {
         posts: [
@@ -1116,14 +1123,16 @@ describe("analyticsPost", () => {
             platforms: [
               {
                 platform: "reddit",
-                analytics: { likes: 5, impressions: null, reach: "1200", views: undefined, clicks: NaN },
+                analytics: { likes: 5, reach: "1200" },
               },
             ],
           },
         ],
       },
     }));
-    await expect(zernioAggregator.analyticsPost!("reddit", "zp_1~a")).resolves.toEqual({ likes: 5 });
+    await expect(zernioAggregator.analyticsPost!("reddit", "zp_1~a")).rejects.toThrow(
+      /posts\[0\]\.platforms\[0\]\.analytics\.reach: expected a finite number, got a string/,
+    );
   });
 
   it("answers empty rather than throwing when the report carries no posts", async () => {
