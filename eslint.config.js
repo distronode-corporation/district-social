@@ -36,7 +36,6 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-enum-comparison": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/require-await": "off",
-      "preserve-caught-error": "off",
       // A deprecated API fails the build, so a deprecation is dealt with when it lands.
       "@typescript-eslint/no-deprecated": "error",
     },
