@@ -23,7 +23,7 @@ function graphemes(text: string): Intl.Segments {
 
 /**
  * Extended grapheme clusters, what Bluesky's `maxGraphemes` counts and what
- * `RichText.graphemeLength` in @atproto/api computes. A family emoji is 1.
+ * the Bluesky facet tag cap counts (`./bluesky-richtext.ts`). A family emoji is 1.
  * Lazy and shared: `Intl.Segmenter` is the expensive object to build.
  */
 export function graphemeCount(text: string): number {

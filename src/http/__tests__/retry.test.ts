@@ -13,6 +13,7 @@
  * is visible and fixable.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ResponseShapeError } from "../shape.js";
 
 import {
   MAX_RETRY_AFTER_MS,
@@ -66,6 +67,16 @@ describe("classification", () => {
     expect(isUnknownOutcome(timeout)).toBe(true);
 
     expect(isUnknownOutcome(new TypeError("fetch failed"))).toBe(true);
+  });
+
+  /**
+   * ⛔ A 2xx answer the client could not read: the vendor performed the
+   * request, so a create may have landed and must not be sent again.
+   */
+  it("treats a response-shape error as UNKNOWN, not a rejection", () => {
+    const err = new ResponseShapeError("bluesky", "com.atproto.repo.createRecord", "body.uri", "a string", "missing");
+    expect(isUnknownOutcome(err)).toBe(true);
+    expect(isRejection(err)).toBe(false);
   });
 
   /**

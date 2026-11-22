@@ -76,7 +76,7 @@ Each point names the code that holds it.
   byte cap and refuses, never truncates, a larger one: a declared `Content-Length` over the
   cap is refused before a byte is read, and a missing or lying one is caught while
   streaming. Every Bluesky response goes through it with a 5 MiB cap (`RESPONSE_CAP_BYTES`
-in `src/bluesky.ts`, the fetch the Bluesky session and agent are built on),
+in `src/bluesky.ts`, the fetch the Bluesky session and client are built on),
   and every fetched media asset with a 512 MiB cap (`src/media-fetch.ts`).
 - **Credentials.** The library stores no credentials and ships none. Network tokens reach
   it only through what the application registers: the `CredentialStore` port

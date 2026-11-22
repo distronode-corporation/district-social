@@ -436,10 +436,9 @@ export const SPECS: Record<Platform, PlatformSpec> = {
     maxImages: 4,
     mixedMediaAllowed: false,
     // 2,000,000 BYTES, and deliberately not `2 * MB`. VENDOR-VERIFIED
-    // 2026-08-05 against the `app.bsky.embed.images` lexicon shipped in the
-    // @atproto/api version this repo runs (`maxSize: 2000000`, `accept:
-    // ["image/*"]`) — the authoritative source, since it is the schema our own
-    // client validates against.
+    // 2026-08-05 against the `app.bsky.embed.images` lexicon shipped in
+    // @atproto/api 0.20.x (`maxSize: 2000000`, `accept: ["image/*"]`), the
+    // schema Bluesky validates records against.
     //
     // ⚠️ Was `1 * MB`, which was both wrong and the wrong KIND of number. It
     // under-permitted by nearly half, needlessly blocking every image between
