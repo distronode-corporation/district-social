@@ -213,7 +213,6 @@ describe("X read", () => {
           data: [
             { id: "1", text: "Short…", note_tweet: { text: "Short and then the rest" }, created_at: "2026-11-08T05:07:00.000Z" },
             { id: "2", text: "Plain" },
-            { id: "", text: "no id" },
           ],
           meta: { next_token: "nt" },
         }),
@@ -254,7 +253,6 @@ describe("Pinterest read", () => {
           { id: "P2", title: null, description: null, created_at: "2026-11-08T05:09:00+00:00" },
           { id: "P3", created_at: "garbage" },
           { id: "P4" },
-          { title: "no id" },
         ],
         bookmark: "bm",
       }),

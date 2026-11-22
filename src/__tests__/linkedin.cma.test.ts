@@ -41,6 +41,7 @@ import {
   type LinkedInLedgerRecord,
 } from "../linkedin.js";
 import { FIXTURE_LINKEDIN_ORG, FIXTURE_LINKEDIN_ORG_URN, FIXTURE_LINKEDIN_POST_ID_2, FIXTURE_LINKEDIN_UGC_URN } from "./helpers/fixtures.js";
+import { ResponseShapeError } from "../http/shape.js";
 
 const TOKEN = "SECRET-ACCESS-TOKEN-abcdefghijklmnopqrstuvwxyz0123456789";
 const ORG = FIXTURE_LINKEDIN_ORG_URN;
@@ -264,9 +265,7 @@ describe("listOrganizationPosts", () => {
         elements: [
           { id: POST, commentary: "Launch day", createdAt: 1700000000000, publishedAt: 1700000000500 },
           { id: "urn:li:ugcPost:2", publishedAt: 1690000000000 },
-          { id: "urn:li:share:3", commentary: 42, createdAt: "yesterday" },
-          { id: "", commentary: "no id" },
-          { commentary: "no id at all" },
+          { id: "urn:li:share:3", commentary: null, createdAt: null },
         ],
       }),
     );
@@ -281,6 +280,18 @@ describe("listOrganizationPosts", () => {
       `https://api.linkedin.com/rest/posts?author=${encodeURIComponent(ORG)}&q=author&count=10&sortBy=CREATED`,
     );
     expect(calledInit(0).headers["X-RestLi-Method"]).toBe("FINDER");
+  });
+
+  it.each([
+    ["a numeric commentary", { id: POST, commentary: 42 }, /elements\[0\]\.commentary: expected a string, got a number/],
+    ["a createdAt that is a string", { id: POST, createdAt: "yesterday" }, /elements\[0\]\.createdAt: expected a finite number, got a string/],
+    ["an empty id", { id: "", commentary: "no id" }, /elements\[0\]\.id: expected a non-empty string, got an empty string/],
+    ["no id at all", { commentary: "no id at all" }, /elements\[0\]\.id: expected a non-empty string, got missing/],
+  ])("refuses an element with %s", async (_label, element, why) => {
+    fetchMock().mockResolvedValue(response(200, { elements: [element] }));
+    const err = await listOrganizationPosts(10).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    expect((err as Error).message).toMatch(why);
   });
 
   it("clamps count to LinkedIn's 1..100", async () => {
@@ -346,14 +357,13 @@ describe("getComments", () => {
     await expect(getComments(POST)).resolves.toEqual([]);
   });
 
-  it("skips an element with no comment urn or no words, and tolerates missing actor and time", async () => {
+  it("skips an element with no words, and tolerates missing actor and time", async () => {
     fetchMock().mockResolvedValue(
       response(200, {
         elements: [
-          comment(1, { commentUrn: undefined }),
           comment(2, { message: { text: "   " } }),
           comment(3, { message: undefined }),
-          comment(4, { actor: 7, created: undefined }),
+          comment(4, { actor: undefined, created: undefined }),
         ],
       }),
     );
@@ -361,6 +371,18 @@ describe("getComments", () => {
     expect(out).toEqual([
       { commentUrn: "urn:li:comment:(urn:li:activity:7380000000000000000,4)", actor: "", text: "comment 4", createdAt: 0 },
     ]);
+  });
+
+  it.each([
+    ["no comment urn", { commentUrn: undefined }, /elements\[0\]\.commentUrn: expected a non-empty string, got missing/],
+    ["a numeric actor", { actor: 7 }, /elements\[0\]\.actor: expected a string, got a number/],
+    ["a message that is a string", { message: "hi" }, /elements\[0\]\.message: expected an object, got a string/],
+    ["a time that is a string", { created: { time: "now" } }, /elements\[0\]\.created\.time: expected a finite number, got a string/],
+  ])("refuses a comment with %s", async (_label, over, why) => {
+    fetchMock().mockResolvedValue(response(200, { elements: [comment(1, over)] }));
+    const err = await getComments(POST).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    expect((err as Error).message).toMatch(why);
   });
 
   it("pages on start/count while pages come back full and paging.total says there is more", async () => {
