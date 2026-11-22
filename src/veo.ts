@@ -1,6 +1,7 @@
 import { GoogleAuth } from "google-auth-library";
 import { vertexVideoConfig } from "./settings.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { shape, type JsonObject, type Shape } from "./http/shape.js";
 
 /**
  * Vertex AI Veo (video generation) client. Text calls go through claude.ts;
@@ -194,7 +195,7 @@ export class VeoError extends Error {
   }
 }
 
-async function postJson(url: string, body: unknown): Promise<Record<string, unknown>> {
+async function postJson(url: string, body: unknown): Promise<unknown> {
   const token = await accessToken();
   const responseOpts: VendorFetchOptions = {
     timeoutMs: REQUEST_TIMEOUT_MS,
@@ -228,15 +229,18 @@ async function postJson(url: string, body: unknown): Promise<Record<string, unkn
 
   if (!response.ok) {
     // Standard Google Cloud REST error envelope: {"error": {"code","message","status"}}.
-    const envelope = parsed as { error?: { message?: string } };
+    // The failure path: the message is kept only when it is a string.
+    const envelope = parsed as { error?: { message?: unknown } } | null;
+    const message = envelope?.error?.message;
     throw new VeoError(
-      envelope.error?.message ?? `Vertex AI request failed with HTTP ${response.status}`,
+      typeof message === "string" ? message : `Vertex AI request failed with HTTP ${response.status}`,
       response.status,
       parsed,
     );
   }
 
-  return parsed as Record<string, unknown>;
+  // Each caller reads the body through a Shape (shape.ts).
+  return parsed;
 }
 
 /**
@@ -311,13 +315,19 @@ export async function startVideoGeneration(input: VeoGenerationRequest): Promise
   const model = input.model ?? config.model;
   const url = `${veoHost(config.location)}/${VERTEX_API_VERSION}/projects/${config.project}/locations/${config.location}/publishers/google/models/${model}:predictLongRunning`;
 
-  const json = await postJson(url, {
-    instances: [{ prompt: input.prompt }],
-    parameters: buildParameters(input),
-  });
+  const s = shape("vertex", "POST :predictLongRunning");
+  const json = s.obj(
+    await postJson(url, {
+      instances: [{ prompt: input.prompt }],
+      parameters: buildParameters(input),
+    }),
+    "(body)",
+  );
 
-  const name = json.name;
-  if (typeof name !== "string" || !name) {
+  // A missing name keeps its own error, whose message names the trap; a
+  // name of the wrong type is a shape error (also never re-sent).
+  const name = s.optStr(json.name, "name");
+  if (!name) {
     throw new VeoError(
       "predictLongRunning returned no operation name — if this generation actually started on Vertex's side, it is now unreachable (see the OPERATION-NAME TRAP warning at the top of this file)",
       0,
@@ -420,21 +430,21 @@ function parseOperationName(operationName: string): { resourceName: string; loca
  * not claim to know this field for Veo either. The three spellings below are
  * defensive guesses, not observed keys.
  */
-function extractEnhancedPrompt(raw: Record<string, unknown>): string | undefined {
+function extractEnhancedPrompt(s: Shape, raw: JsonObject, at: string): string | undefined {
   for (const key of ["prompt", "revisedPrompt", "enhancedPrompt"]) {
-    const value = raw[key];
-    if (typeof value === "string" && value.length > 0) return value;
+    const value = s.optStr(raw[key], `${at}.${key}`);
+    if (value) return value;
   }
   return undefined;
 }
 
-function parseGeneratedVideo(raw: unknown): VeoGeneratedVideo {
-  const v = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+function parseGeneratedVideo(s: Shape, raw: unknown, at: string): VeoGeneratedVideo {
+  const v = s.obj(raw, at);
   return {
-    uri: typeof v.gcsUri === "string" ? v.gcsUri : undefined,
-    videoBytes: typeof v.bytesBase64Encoded === "string" ? v.bytesBase64Encoded : undefined,
-    mimeType: typeof v.mimeType === "string" ? v.mimeType : undefined,
-    enhancedPrompt: extractEnhancedPrompt(v),
+    uri: s.optId(v.gcsUri, `${at}.gcsUri`),
+    videoBytes: s.optStr(v.bytesBase64Encoded, `${at}.bytesBase64Encoded`),
+    mimeType: s.optStr(v.mimeType, `${at}.mimeType`),
+    enhancedPrompt: extractEnhancedPrompt(s, v, at),
   };
 }
 
@@ -450,35 +460,33 @@ export async function pollVideoOperation(operationName: string): Promise<VeoOper
   const { resourceName, location } = parseOperationName(operationName);
   const url = `${veoHost(location)}/${VERTEX_API_VERSION}/${resourceName}:fetchPredictOperation`;
 
-  const json = await postJson(url, { operationName });
+  const s = shape("vertex", "POST :fetchPredictOperation");
+  const json = s.obj(await postJson(url, { operationName }), "(body)");
 
-  if (json.done !== true) {
+  if (s.optBool(json.done, "done") !== true) {
     return { status: "running" };
   }
 
-  if (json.error) {
-    const err = json.error as Record<string, unknown>;
+  const err = s.optObj(json.error, "error");
+  if (err) {
     return {
       status: "failed",
       error: {
-        code: typeof err.code === "number" ? err.code : undefined,
-        message: typeof err.message === "string" ? err.message : `operation ${operationName} failed with no message`,
-        details: Array.isArray(err.details) ? err.details : undefined,
+        code: s.optNum(err.code, "error.code"),
+        message: s.optStr(err.message, "error.message") ?? `operation ${operationName} failed with no message`,
+        details: s.optArr(err.details, "error.details"),
       },
     };
   }
 
-  const resp = (json.response && typeof json.response === "object" ? json.response : {}) as Record<
-    string,
-    unknown
-  >;
-  const rawVideos = Array.isArray(resp.videos) ? resp.videos : [];
+  const resp = s.optObj(json.response, "response") ?? {};
   return {
     status: "succeeded",
-    videos: rawVideos.map(parseGeneratedVideo),
-    raiFilteredCount: typeof resp.raiMediaFilteredCount === "number" ? resp.raiMediaFilteredCount : undefined,
-    raiFilteredReasons: Array.isArray(resp.raiMediaFilteredReasons)
-      ? (resp.raiMediaFilteredReasons as string[])
-      : undefined,
+    videos: s.optEach(resp.videos, "response.videos", (v, at) => parseGeneratedVideo(s, v, at)),
+    raiFilteredCount: s.optNum(resp.raiMediaFilteredCount, "response.raiMediaFilteredCount"),
+    raiFilteredReasons:
+      resp.raiMediaFilteredReasons === undefined || resp.raiMediaFilteredReasons === null
+        ? undefined
+        : s.each(resp.raiMediaFilteredReasons, "response.raiMediaFilteredReasons", (r, at) => s.str(r, at)),
   };
 }

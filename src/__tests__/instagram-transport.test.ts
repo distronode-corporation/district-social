@@ -177,6 +177,13 @@ describe("instagram transport", () => {
       vi.useRealTimers();
     });
 
+    it("refuses a status_code outside the documented five rather than polling on it", async () => {
+      graphRequestMock.mockResolvedValueOnce({ id: "container-1" }).mockResolvedValueOnce({ status_code: "DONE" });
+      await expect(instagramTransport.publishNow(input())).rejects.toThrow(
+        /meta GET :container-id\?fields=status_code,status: unexpected response shape at status_code: expected one of EXPIRED, ERROR, FINISHED, IN_PROGRESS, PUBLISHED, got a string/,
+      );
+    });
+
     it("throws a clear error when the container reaches ERROR", async () => {
       graphRequestMock
         .mockResolvedValueOnce({ id: "container-1" })

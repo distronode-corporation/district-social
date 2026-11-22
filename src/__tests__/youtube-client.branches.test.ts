@@ -163,7 +163,7 @@ describe("request response handling", () => {
     // on the missing envelope rather than reporting a bogus parse error. The
     // distinction matters when diagnosing a truncated vendor response.
     fetchMock().mockResolvedValue(textResponse(200, ""));
-    await expect(getVideos(["v1"])).rejects.not.toThrow(/expected JSON/);
+    await expect(getVideos(["v1"])).rejects.toThrow(/unexpected response shape at \(body\): expected an object, got missing/);
   });
 
   it("survives a 204 on the delete path, which carries no body by design", async () => {
@@ -199,12 +199,12 @@ describe("toVideo mapping", () => {
     ]);
   });
 
-  it("drops a privacyStatus outside the documented enum rather than passing it upward", async () => {
+  it("refuses a privacyStatus outside the documented enum rather than passing it upward", async () => {
     fetchMock().mockResolvedValue(
       jsonResponse(200, { items: [{ id: "a", status: { privacyStatus: "somethingNew" } }] }),
     );
 
-    await expect(getVideos(["a"])).resolves.toEqual([{ id: "a", title: undefined, privacyStatus: undefined }]);
+    await expect(getVideos(["a"])).rejects.toThrow(/items\[0\]\.status\.privacyStatus: expected one of public, unlisted, private, got a string/);
   });
 });
 
@@ -253,18 +253,20 @@ describe("getVideoStats", () => {
     await expect(getVideoStats(["v1"])).resolves.toEqual([{ id: "v1", views: 5 }]);
   });
 
-  it("drops a counter that is neither a string nor a number", async () => {
-    fetchMock().mockResolvedValue(
-      jsonResponse(200, { items: [{ id: "v1", statistics: { viewCount: null, likeCount: { n: 1 } } }] }),
-    );
+  it("reads a null counter as absent and refuses one that is neither a string nor a number", async () => {
+    fetchMock().mockResolvedValueOnce(jsonResponse(200, { items: [{ id: "v1", statistics: { viewCount: null } }] }));
     await expect(getVideoStats(["v1"])).resolves.toEqual([{ id: "v1" }]);
+    fetchMock().mockResolvedValueOnce(jsonResponse(200, { items: [{ id: "v1", statistics: { likeCount: { n: 1 } } }] }));
+    await expect(getVideoStats(["v1"])).rejects.toThrow(/items\[0\]\.statistics\.likeCount: expected a count/);
   });
 
-  it("drops a counter whose string is not a finite number", async () => {
+  it("refuses a counter whose string is not a number, without echoing it", async () => {
     fetchMock().mockResolvedValue(
       jsonResponse(200, { items: [{ id: "v1", statistics: { viewCount: "not-a-number" } }] }),
     );
-    await expect(getVideoStats(["v1"])).resolves.toEqual([{ id: "v1" }]);
+    const err = await getVideoStats(["v1"]).catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/viewCount: expected a count .*, got a string/);
+    expect((err as Error).message).not.toContain("not-a-number");
   });
 
   it("returns the id alone for an item carrying no statistics block", async () => {

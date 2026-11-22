@@ -21,6 +21,7 @@ import {
   unpublishPost,
   ZernioError,
   type ZernioAccount,
+  type ZernioAnalytics,
   type ZernioAnalyticsReport,
   type ZernioPlatformData,
   type ZernioPlatformResult,
@@ -355,12 +356,9 @@ function legFor(post: { platforms?: ZernioPlatformResult[] }, platform: Platform
 }
 
 /** Keep only real numbers, so a null or a string cannot land in a counters map. */
-function numeric(a: Record<string, unknown> | object | undefined): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries((a ?? {}) as Record<string, unknown>)) {
-    if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
-  }
-  return out;
+function numeric(a: ZernioAnalytics | undefined): Record<string, number> {
+  // zernio.ts's getAnalytics has already read every counter as a finite number.
+  return { ...a } as Record<string, number>;
 }
 
 /**

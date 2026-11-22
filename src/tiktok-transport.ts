@@ -36,7 +36,6 @@ import {
   publishStatus,
   publishVideo,
   tiktokCredentials,
-  TIKTOK_POST_METRIC_FIELDS,
   type TikTokPublishState,
   type TikTokPublishStatus,
 } from "./tiktok.js";
@@ -279,13 +278,8 @@ async function analyticsPost(ref: string): Promise<Record<string, number>> {
   const { shareId, postId } = splitRef(ref);
   const id = postId || (await publishStatus(shareId)).postIds[0];
   if (!id) return {};
-  const video = await getPostMetrics(id);
-  const out: Record<string, number> = {};
-  for (const field of TIKTOK_POST_METRIC_FIELDS) {
-    const value = video?.[field];
-    if (typeof value === "number") out[field] = value;
-  }
-  return out;
+  // getPostMetrics has already read each counter as a finite number or left it out.
+  return (await getPostMetrics(id)) ?? {};
 }
 
 /** `followers_count` needs `user.info.stats`; a grant without it gets no number, and says why. */

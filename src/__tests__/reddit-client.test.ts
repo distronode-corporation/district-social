@@ -323,14 +323,14 @@ describe("reddit client", () => {
       await expect(getLinkFlair("saas")).resolves.toEqual([{ id: "f2", text: "Question" }]);
     });
 
-    it("drops an entry matching neither shape rather than guessing", async () => {
+    it("refuses an entry matching neither shape rather than guessing", async () => {
       fetchMock().mockResolvedValue(jsonResponse(200, [{ somethingElse: true }, { id: "f1", text: "ok" }]));
-      await expect(getLinkFlair("saas")).resolves.toEqual([{ id: "f1", text: "ok" }]);
+      await expect(getLinkFlair("saas")).rejects.toThrow("at (body)[0].id: expected a non-empty string, got missing");
     });
 
-    it("returns [] when the response is not an array, rather than throwing", async () => {
+    it("refuses a response that is not an array", async () => {
       fetchMock().mockResolvedValue(jsonResponse(200, { unexpected: "shape" }));
-      await expect(getLinkFlair("saas")).resolves.toEqual([]);
+      await expect(getLinkFlair("saas")).rejects.toThrow("at (body): expected an array, got an object");
     });
   });
 

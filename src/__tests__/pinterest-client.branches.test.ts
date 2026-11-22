@@ -263,8 +263,24 @@ describe("analytics values that cannot be read", () => {
     await expect(getPinAnalytics("pin-1")).resolves.toEqual({});
   });
 
-  it("reports an empty metric bag when the payload is JSON null rather than an object", async () => {
+  it("refuses a payload that is JSON null or an array rather than an object", async () => {
     fetchMock.mockResolvedValueOnce(textResponse(200, "null"));
+    await expect(getPinAnalytics("pin-1")).rejects.toThrow(
+      "pinterest GET /pins/:id/analytics: unexpected response shape at (body): expected an object, got null",
+    );
+    fetchMock.mockResolvedValueOnce(textResponse(200, "[]"));
+    await expect(getPinAnalytics("pin-1")).rejects.toThrow("expected an object, got an array");
+  });
+
+  it("refuses an ALL block, or its summary, that is not an object", async () => {
+    fetchMock.mockResolvedValueOnce(textResponse(200, JSON.stringify({ ALL: 5 })));
+    await expect(getPinAnalytics("pin-1")).rejects.toThrow("at ALL: expected an object, got a number");
+    fetchMock.mockResolvedValueOnce(textResponse(200, JSON.stringify({ ALL: { summary_metrics: [] } })));
+    await expect(getPinAnalytics("pin-1")).rejects.toThrow("at ALL.summary_metrics: expected an object, got an array");
+  });
+
+  it("reads an empty body as no metrics", async () => {
+    fetchMock.mockResolvedValueOnce(textResponse(200, ""));
     await expect(getPinAnalytics("pin-1")).resolves.toEqual({});
   });
 

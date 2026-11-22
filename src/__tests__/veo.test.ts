@@ -421,17 +421,20 @@ describe("veo transport failures and sparse video entries", () => {
     await expect(startVideoGeneration({ prompt: "p" })).rejects.toThrow(/no operation name/);
   });
 
-  it("turns a null or mimeType-less video entry into an all-undefined video rather than throwing", async () => {
+  it("reads a mimeType-less video entry as an all-undefined video, and refuses a null one", async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({ name: RUNNING_OPERATION, done: true, response: { videos: [null, { gcsUri: "gs://b/v.mp4" }] } }),
+      jsonResponse({ name: RUNNING_OPERATION, done: true, response: { videos: [{ gcsUri: "gs://b/v.mp4" }] } }),
     );
-    const result = await pollVideoOperation(RUNNING_OPERATION);
-    expect(result).toMatchObject({
+    await expect(pollVideoOperation(RUNNING_OPERATION)).resolves.toMatchObject({
       status: "succeeded",
-      videos: [
-        { uri: undefined, videoBytes: undefined, mimeType: undefined, enhancedPrompt: undefined },
-        { uri: "gs://b/v.mp4", videoBytes: undefined, mimeType: undefined, enhancedPrompt: undefined },
-      ],
+      videos: [{ uri: "gs://b/v.mp4", videoBytes: undefined, mimeType: undefined, enhancedPrompt: undefined }],
     });
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ name: RUNNING_OPERATION, done: true, response: { videos: [null] } }),
+    );
+    await expect(pollVideoOperation(RUNNING_OPERATION)).rejects.toThrow(
+      /vertex POST :fetchPredictOperation: unexpected response shape at response\.videos\[0\]: expected an object, got null/,
+    );
   });
 });
