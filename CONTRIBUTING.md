@@ -87,10 +87,7 @@ per file, by the thresholds in `vitest.config.ts`. The rules that go with it:
   reviews it like any other change.
 - **Overrides are for advisories.** `overrides.minimatch` lifts eslint's and
   typescript-eslint's `minimatch` 10.x to a release with the fix for GHSA-g3hv-75wg-m249
-  (patched in 11.0.1). Drop it once both depend on a patched range. `overrides.zod` lifts
-  the zod 3 that the @atproto packages pull in to 4.6.6, the fix for GHSA-mrhx-c7xc-m3w5;
-  no zod 3 release has the fix, so this crosses the `^3` range they declare. Drop it once
-  `@atproto/api` admits a fixed zod.
+  (patched in 11.0.1). Drop it once both depend on a patched range.
 - **TypeScript follows typescript-eslint.** TypeScript is 6.0, the newest line in
   typescript-eslint's peer range; TypeScript 7 has no JavaScript API for it to load yet.
 - **Few, and permissive.** Prefer the standard library and the existing dependencies. Say in

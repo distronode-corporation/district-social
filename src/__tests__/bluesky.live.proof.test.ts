@@ -33,7 +33,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { AtpSessionData } from "@atproto/api";
+import type { AtpSessionData } from "../bluesky-xrpc.js";
 import { getPosts, setBlueskyCredentialsResolver, setBlueskySessionStore } from "../bluesky.js";
 import { blueskyTransport } from "../bluesky-transport.js";
 import type { PlatformRender } from "../types.js";

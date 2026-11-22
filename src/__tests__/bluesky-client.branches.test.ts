@@ -22,12 +22,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *     on the wrong events, or lets a storage hiccup escape, the account is
  *     back to burning `createSession` calls and hits 429 in production.
  *
- * ⚠️ RichText is MOCKED here, unlike in bluesky.test.ts, purely so
- * detectFacets can be made to fail. The real facet detection swallows its own
- * network errors (rich-text.ts catches around resolveHandle), so there is no
- * honest way to exercise buildRichText's catch with the genuine class. Real
- * facet output and real grapheme counting stay pinned in bluesky.test.ts; do
- * not move those assertions here.
+ * The XRPC client (bluesky-xrpc.ts) is mocked at its class boundary here, so
+ * the session logic in getAgent can be gated step by step; bluesky-xrpc.test.ts
+ * covers the client itself against a fake server at the fetch level.
  */
 
 type PersistHandler = (evt: string, data?: unknown) => void;
@@ -41,7 +38,7 @@ const h = vi.hoisted(() => ({
   onAgent: undefined as (() => void) | undefined,
   login: vi.fn(),
   resumeSession: vi.fn(),
-  detectFacets: vi.fn(),
+  resolveHandle: vi.fn(),
   post: vi.fn(),
   getPosts: vi.fn(),
   searchPosts: vi.fn(),
@@ -50,8 +47,8 @@ const h = vi.hoisted(() => ({
   getProfile: vi.fn(),
 }));
 
-vi.mock("@atproto/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@atproto/api")>();
+vi.mock("../bluesky-xrpc.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../bluesky-xrpc.js")>();
 
   // ⛔ Declared INSIDE the factory. The factory is hoisted above every
   // top-level binding, so a class declared in module scope is still in its
@@ -98,35 +95,21 @@ vi.mock("@atproto/api", async (importOriginal) => {
     deletePost = h.deletePost;
     uploadBlob = h.uploadBlob;
     getProfile = h.getProfile;
-    app = { bsky: { feed: { searchPosts: h.searchPosts } } };
-  }
-
-  class MockRichText {
-    text: string;
-    facets?: unknown;
-    constructor(opts: { text: string }) {
-      this.text = opts.text;
-    }
-    get graphemeLength() {
-      return [...this.text].length;
-    }
-    detectFacets = async (agent: unknown) => {
-      const out = (await h.detectFacets(agent)) as { facets?: unknown } | undefined;
-      if (out && "facets" in out) this.facets = out.facets;
-    };
+    searchPosts = h.searchPosts;
+    resolveHandle = h.resolveHandle;
   }
 
   return {
     ...actual,
     CredentialSession: MockCredentialSession,
     Agent: MockAgent,
-    RichText: MockRichText,
   };
 });
 
-import { XRPCError, type BlobRef } from "@atproto/api";
+import { XRPCError, type BlobRef } from "../bluesky-xrpc.js";
 import type { BlueskySessionStore } from "../bluesky.js";
 import { isUnknownOutcome } from "../retry.js";
+import { ResponseShapeError } from "../http/shape.js";
 import {
   BlueskyError,
   setBlueskyCredentialsResolver,
@@ -144,7 +127,7 @@ import {
 const CREDS = { identifier: "example.com", password: "app-password" };
 /** The hash a session created for CREDS is stored with. */
 const CREDS_HASH = blueskyIdentifierHash(CREDS.identifier);
-const PROFILE = { data: { did: "did:plc:testaccount000", handle: "example.com" } };
+const PROFILE = { did: "did:plc:testaccount000", handle: "example.com" };
 
 /** Opens a real (mocked) session so the constructed CredentialSession can be inspected. */
 async function openSession(): Promise<void> {
@@ -166,7 +149,7 @@ beforeEach(() => {
   // clearAllMocks would leave it for the next test to inherit.
   h.login.mockReset().mockResolvedValue(undefined);
   h.resumeSession.mockReset().mockResolvedValue(undefined);
-  h.detectFacets.mockReset().mockResolvedValue(undefined);
+  h.resolveHandle.mockReset().mockResolvedValue("did:plc:resolved");
   h.post.mockReset();
   h.getPosts.mockReset();
   h.searchPosts.mockReset();
@@ -251,15 +234,14 @@ describe("what a caller can conclude from a BlueskyError", () => {
   });
 
   /**
-   * ⚠️ A TIMEOUT IS STATUS 1, NOT 0. The timebox aborts the fetch, XRPC wraps
-   * the abort as an XRPCError with ResponseType.Unknown (= 1), and wrapError
+   * ⚠️ A TIMEOUT IS STATUS 1, NOT 0. The timebox aborts the fetch, the client
+   * wraps the abort as an XRPCError of status 1 (no answer), and wrapError
    * passes that number straight through. Code that treats 0 as "the network
    * layer failed" will silently miss every timeout.
    */
   it("surfaces a timed-out request as XRPC status 1 (Unknown), not 0", async () => {
-    h.post.mockRejectedValue(
-      XRPCError.from(new Error("The operation was aborted due to timeout")),
-    );
+    // What the client's send() makes of an aborted fetch.
+    h.post.mockRejectedValue(new XRPCError(1, "Unknown", "The operation was aborted due to timeout"));
 
     const err = (await createPost({ text: "x" }).catch((e: unknown) => e)) as BlueskyError;
 
@@ -268,9 +250,9 @@ describe("what a caller can conclude from a BlueskyError", () => {
   });
 
   /**
-   * ⚠️ Purely defensive: the real XRPCError always assigns a string `error` and
-   * Error always assigns a string `message`, so this is not reachable through
-   * the vendor SDK. It is pinned anyway because `body` is what lands in the
+   * ⚠️ Purely defensive: the client's XRPCError always assigns a string `error`
+   * and Error always assigns a string `message`, so this is not reachable
+   * through the client. It is pinned anyway because `body` is what lands in the
    * log, and "undefined: undefined" would be an unreadable log line.
    */
   it("never renders 'undefined' into the body when a vendor error is missing its fields", async () => {
@@ -318,7 +300,7 @@ describe("the request timebox", () => {
   });
 
   /**
-   * ⛔ The caller's signal WINS. @atproto/api passes its own AbortSignal for
+   * ⛔ The caller's signal WINS. A caller may pass its own AbortSignal for
    * calls the app cancels; replacing it would make a cancel silently do
    * nothing and leave the request running to its own timeout instead.
    */
@@ -428,8 +410,8 @@ describe("the response byte cap", () => {
 
   /**
    * ⛔ THE REFUSAL IS THE SAME SHAPE A TIMEOUT IS. The wrapped fetch throws a
-   * plain Error (like the timebox's DOMException), the real XRPC client's
-   * catch wraps it with XRPCError.from, and wrapError turns that into the one
+   * plain Error (like the timebox's DOMException), the XRPC client's send()
+   * wraps it in an XRPCError of status 1, and wrapError turns that into the one
    * error shape that ever escapes this file: a BlueskyError of status 1
    * (Unknown), never 0 and never a silent pass-through. Getting the status
    * wrong makes retry.ts misclassify the failure.
@@ -440,14 +422,14 @@ describe("the response byte cap", () => {
       new Response(new Uint8Array([1]), { headers: { "content-length": String(CAP + 1) } }),
     );
     try {
-      // What the real xrpc-client.js catch does to anything the fetch handler
-      // throws, applied to the genuine refusal.
+      // What the client's send() does to anything the fetch throws, applied to
+      // the genuine refusal.
       const raw = await wrapped("https://bsky.social/xrpc/app.bsky.feed.getPosts").then(
         () => null,
         (e: unknown) => e,
       );
       expect(raw).toBeInstanceOf(Error);
-      const xrpc = XRPCError.from(raw);
+      const xrpc = new XRPCError(1, "Unknown", (raw as Error).message, {}, { cause: raw });
       expect(xrpc).toBeInstanceOf(XRPCError);
       expect(xrpc.status).toBe(1);
       expect(xrpc.message).toContain("exceeds the fetch byte cap");
@@ -624,7 +606,7 @@ describe("opening the session", () => {
       await gate;
       return CREDS;
     });
-    h.getPosts.mockResolvedValue({ data: { posts: [] } });
+    h.getPosts.mockResolvedValue([]);
 
     // Both start before either can finish logging in.
     const first = getProfile("did:plc:x");
@@ -721,7 +703,7 @@ describe("persisting the session", () => {
     active: true,
     identifierHash: CREDS_HASH,
   };
-  /** What @atproto/api hands persistSession: its own fields, no hash. */
+  /** What the XRPC client hands persistSession: its own fields, no hash. */
   const { identifierHash: _hash, ...ATP_DATA } = SESSION_DATA;
 
   it("saves the session on create and again on every token rotation", async () => {
@@ -769,7 +751,7 @@ describe("persisting the session", () => {
   });
 
   /**
-   * ⛔ `network-error` KEEPS the stored session. @atproto/api fires it when a
+   * ⛔ `network-error` KEEPS the stored session. The client fires it when a
    * refresh failed for a reason that says nothing about the token (a timeout, a
    * PDS 5xx) and keeps the session itself. Clearing the fleet-shared row on it
    * made every pod that saw a blip log in again, spending the 10-a-day
@@ -973,32 +955,33 @@ describe("persisting the session", () => {
 
 describe("buildRichText", () => {
   /**
-   * ⛔ detectFacets needs the AUTHENTICATED agent: resolving an @mention to a
-   * DID is an API call. Passing anything else turns every mention into a
-   * facet with an empty did, which renders as plain text.
+   * ⛔ Resolving an @mention to a DID is an authenticated call, so it goes
+   * through the session's Agent. A mention left unresolved would render as
+   * plain text, which is what happens when the resolver fails.
    */
-  it("hands the authenticated agent to facet detection and returns what it found", async () => {
-    const facet = {
-      index: { byteStart: 0, byteEnd: 4 },
-      features: [{ $type: "app.bsky.richtext.facet#link", uri: "https://example.com" }],
-    };
-    h.detectFacets.mockResolvedValue({ facets: [facet] });
+  it("resolves each mention through the authenticated agent", async () => {
+    const result = await buildRichText("hi @alice.bsky.social");
 
-    const result = await buildRichText("link");
-
-    expect(h.detectFacets).toHaveBeenCalledTimes(1);
-    expect(h.detectFacets.mock.calls[0][0]).toBeDefined();
-    expect(result).toEqual({ text: "link", facets: [facet] });
+    expect(h.resolveHandle).toHaveBeenCalledWith("alice.bsky.social");
+    expect(result).toEqual({
+      text: "hi @alice.bsky.social",
+      facets: [
+        {
+          $type: "app.bsky.richtext.facet",
+          index: { byteStart: 3, byteEnd: 21 },
+          features: [{ $type: "app.bsky.richtext.facet#mention", did: "did:plc:resolved" }],
+        },
+      ],
+    });
   });
 
-  it("wraps a facet-detection failure as a read of app.bsky.richtext.detectFacets", async () => {
-    h.detectFacets.mockRejectedValue(new XRPCError(502, "UpstreamFailure", "appview down"));
+  it("keeps the text and drops the mention when the handle does not resolve", async () => {
+    h.resolveHandle.mockRejectedValue(new XRPCError(400, "InvalidRequest", "Unable to resolve handle"));
 
-    const err = (await buildRichText("hello").catch((e: unknown) => e)) as BlueskyError;
-
-    expect(err).toBeInstanceOf(BlueskyError);
-    expect(err.status).toBe(502);
-    expect(err.message).toContain("GET app.bsky.richtext.detectFacets");
+    await expect(buildRichText("hi @ghost.bsky.social")).resolves.toEqual({
+      text: "hi @ghost.bsky.social",
+      facets: undefined,
+    });
   });
 });
 
@@ -1021,7 +1004,7 @@ describe("getPosts", () => {
  */
 describe("searchPosts", () => {
   it("reuses the publishing session rather than opening a second one", async () => {
-    h.searchPosts.mockResolvedValue({ data: { posts: [] } });
+    h.searchPosts.mockResolvedValue([]);
 
     await getProfile("did:plc:x");
     await searchPosts("examplebrand");
@@ -1035,7 +1018,7 @@ describe("searchPosts", () => {
 
   it("returns the posts the vendor found, for the query given", async () => {
     const posts = [{ uri: "at://did:plc:a/app.bsky.feed.post/1", cid: "c1" }];
-    h.searchPosts.mockResolvedValue({ data: { posts } });
+    h.searchPosts.mockResolvedValue(posts);
 
     const result = await searchPosts("district ai");
 
@@ -1044,7 +1027,7 @@ describe("searchPosts", () => {
   });
 
   it("asks for 20 results when the caller does not choose a limit", async () => {
-    h.searchPosts.mockResolvedValue({ data: { posts: [] } });
+    h.searchPosts.mockResolvedValue([]);
 
     await searchPosts("examplebrand");
 
@@ -1058,7 +1041,7 @@ describe("searchPosts", () => {
    * than the first 100.
    */
   it("clamps an over-large limit to the vendor's maximum of 100", async () => {
-    h.searchPosts.mockResolvedValue({ data: { posts: [] } });
+    h.searchPosts.mockResolvedValue([]);
 
     await searchPosts("examplebrand", 250);
 
@@ -1066,7 +1049,7 @@ describe("searchPosts", () => {
   });
 
   it("leaves a smaller limit alone", async () => {
-    h.searchPosts.mockResolvedValue({ data: { posts: [] } });
+    h.searchPosts.mockResolvedValue([]);
 
     await searchPosts("examplebrand", 5);
 
@@ -1141,14 +1124,12 @@ describe("getProfile", () => {
 
   it("passes the aggregate counts through when the appview supplies them", async () => {
     h.getProfile.mockResolvedValue({
-      data: {
-        did: "did:plc:test",
-        handle: "example.com",
-        displayName: "Acme",
-        followersCount: 412,
-        followsCount: 88,
-        postsCount: 1301,
-      },
+      did: "did:plc:test",
+      handle: "example.com",
+      displayName: "Acme",
+      followersCount: 412,
+      followsCount: 88,
+      postsCount: 1301,
     });
 
     await expect(getProfile()).resolves.toEqual({
@@ -1167,7 +1148,7 @@ describe("getProfile", () => {
    * `?? 0` here would put a confident, wrong zero in front of an operator.
    */
   it("leaves a missing count undefined rather than turning it into a real zero", async () => {
-    h.getProfile.mockResolvedValue({ data: { did: "did:plc:test", handle: "example.com" } });
+    h.getProfile.mockResolvedValue({ did: "did:plc:test", handle: "example.com" });
 
     const profile = await getProfile();
 
@@ -1278,5 +1259,71 @@ describe("session ownership", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+/**
+ * ⛔ A 2xx answer the client could not read is an UNKNOWN outcome on a create
+ * (the post may be live), and NOT one on a login (nothing was posted).
+ */
+describe("answers the client could not read", () => {
+  const shapeError = (operation: string) =>
+    new ResponseShapeError("bluesky", operation, "body.uri", "a string", "missing");
+
+  it("passes a create's shape error through unwrapped, so retry.ts never sends it again", async () => {
+    const err = shapeError("com.atproto.repo.createRecord");
+    h.post.mockRejectedValue(err);
+
+    const got = await createPost({ text: "hello" }).catch((e: unknown) => e);
+
+    expect(got).toBe(err);
+    expect(isUnknownOutcome(got)).toBe(true);
+  });
+
+  it("turns a login's shape error into a plain Error that is not an unknown outcome", async () => {
+    const cause = shapeError("com.atproto.server.createSession");
+    h.login.mockRejectedValue(cause);
+
+    const got = await createPost({ text: "hello" }).catch((e: unknown) => e);
+
+    expect(got).not.toBeInstanceOf(BlueskyError);
+    expect(got).not.toBeInstanceOf(ResponseShapeError);
+    expect((got as Error).message).toBe(`${cause.message} (no post was sent)`);
+    expect((got as Error).cause).toBe(cause);
+    expect(isUnknownOutcome(got)).toBe(false);
+    expect(h.post).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ⛔ A record the lexicon refuses is refused HERE, before the session opens or
+ * anything is sent, as a plain Error: a BlueskyError of status 0 would read as
+ * "the post may already be live" to retry.ts.
+ */
+describe("a post the lexicon does not allow", () => {
+  const blob = { $type: "blob", ref: { $link: "b" }, mimeType: "image/png", size: 1 } as BlobRef;
+
+  it.each([
+    ["more than 300 graphemes", { text: "🗣️".repeat(301) }, "the text is 301 graphemes (the limit is 300)"],
+    ["more than 3000 UTF-8 bytes in 300 graphemes", { text: "👨‍👩‍👧‍👦".repeat(121) }, "the text is over 3000 UTF-8 bytes"],
+    ["more than four images", { text: "hi", images: Array.from({ length: 5 }, () => ({ blob, alt: "" })) }, "the post carries 5 images (the limit is 4)"],
+  ])("is refused with nothing sent: %s", async (_label, input, why) => {
+    const err = await createPost(input).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(BlueskyError);
+    expect((err as Error).message).toBe(
+      `bluesky: refusing to send a post the lexicon does not allow: ${why}. Nothing was sent.`,
+    );
+    expect(isUnknownOutcome(err)).toBe(false);
+    expect(h.login).not.toHaveBeenCalled();
+    expect(h.post).not.toHaveBeenCalled();
+  });
+
+  it("sends a post at exactly the limits", async () => {
+    h.post.mockResolvedValue({ uri: "at://did:plc:x/app.bsky.feed.post/1", cid: "c" });
+    const images = Array.from({ length: 4 }, () => ({ blob, alt: "" }));
+
+    await expect(createPost({ text: "a".repeat(300), images })).resolves.toBeDefined();
   });
 });

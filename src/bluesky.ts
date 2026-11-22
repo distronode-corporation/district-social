@@ -1,9 +1,10 @@
 /**
  * Bluesky (AT Protocol) vendor client.
  *
- * Every raw call to the vendor lives here, and nothing above this file touches
- * @atproto/api directly (publishing is direct per platform). Two things this
- * file owns that an aggregator never has to think about:
+ * Every raw call to the vendor lives here or in the XRPC client under it
+ * (`./bluesky-xrpc.ts`), and nothing above this file speaks the protocol
+ * (publishing is direct per platform). Two things this file owns that an
+ * aggregator never has to think about:
  *
  *   - a session. An aggregator holds one static API key; Bluesky needs a logged-in
  *     account, and com.atproto.server.createSession is rate-limited per
@@ -16,49 +17,27 @@
  * Engine rules apply: relative imports only.
  */
 
-import type {
-  Agent,
-  AppBskyFeedDefs,
-  AppBskyRichtextFacet,
-  AtpSessionData,
-  BlobRef,
-  ComAtprotoRepoStrongRef,
-} from "@atproto/api";
 import { createHash } from "node:crypto";
 import { getErrorMessage } from "./error-message.js";
 import type { RecentPostsPage } from "./recent-posts.js";
 // The engine's own capped reader (read-capped.ts), shared with media-fetch.ts.
 import { readCappedBody } from "./read-capped.js";
+import {
+  Agent,
+  CredentialSession,
+  XRPCError,
+  type AtpSessionData,
+  type BlobRef,
+  type Facet,
+  type PostRecord,
+  type PostView,
+  type StrongRef,
+} from "./bluesky-xrpc.js";
+import { detectFacets, resolveMentions } from "./bluesky-richtext.js";
+import { ResponseShapeError } from "./http/shape.js";
+import { graphemeCount } from "./length.js";
 
-/**
- * ⛔ `@atproto/api` IS LOADED LAZILY, NEVER AS A STATIC VALUE IMPORT.
- *
- * Its dependency `multiformats` publishes `./cid` with an `import` condition
- * only. A static `import { Agent } from "@atproto/api"` is fine under a bundler
- * or vitest (both bundle ESM), but the CLI runs through tsx in a
- * CommonJS package, and tsx's CJS resolver then fails at module load with
- * `ERR_PACKAGE_PATH_NOT_EXPORTED: ./cid` before a single command runs, on a
- * clean install too (so not a stale node_modules).
- *
- * A dynamic `import()` resolves the `import` condition from any runner. It is
- * awaited once and cached; every network path goes through getAgent(), so the
- * module is always loaded before anything that could throw an XRPCError.
- */
-type AtprotoApi = typeof import("@atproto/api");
-let _api: AtprotoApi | null = null;
-let _apiPromise: Promise<AtprotoApi> | null = null;
-async function atproto(): Promise<AtprotoApi> {
-  if (_api) return _api;
-  _apiPromise ??= import("@atproto/api").then((m) => {
-    _api = m;
-    return m;
-  });
-  return _apiPromise;
-}
-
-export type StrongRef = ComAtprotoRepoStrongRef.Main;
-export type Facet = AppBskyRichtextFacet.Main;
-export type PostView = AppBskyFeedDefs.PostView;
+export type { StrongRef, Facet, PostView };
 
 /**
  * ⛔ NOT public.api.bsky.app. That AppView host 403s authenticated writes and
@@ -74,13 +53,8 @@ const SERVICE_URL = "https://bsky.social";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /**
- * The cap on any ONE Bluesky response body (defence in depth).
- *
- * The nested zod advisory (GHSA-mrhx-c7xc-m3w5) is fixed by
- * `overrides.zod` (4.6.6) in package.json. The cap stays: what the advisory
- * named is memory exhaustion from a crafted response, and this wrapper only
- * ever dials the hard-coded bsky.social AppView (SERVICE_URL above), so a
- * byte cap on what a response may hold in memory bounds that whole class.
+ * The cap on any ONE Bluesky response body: a hostile or broken answer cannot
+ * hold more than this in memory, whatever the parser does with it.
  *
  * Sized generously off the largest payload the callers legitimately read: a
  * 100-post searchPosts or 25-URI getPosts page is a few hundred KB of JSON,
@@ -104,55 +78,55 @@ export class BlueskyError extends Error {
 }
 
 /**
- * Every call through the XRPC client (session management included) already
- * wraps its cause in an XRPCError by the time it reaches us — including a
- * fetch-level timeout, which surfaces as XRPCError with an Unknown status and
- * the abort's message rather than as a raw DOMException. So this one branch
- * covers network failures, timeouts and real vendor error responses alike.
+ * Every call through the XRPC client (session management included) fails with
+ * an XRPCError, a request that got no answer included (status 1, with the
+ * cause's message), so this one branch covers network failures, timeouts and
+ * real vendor error responses alike.
+ *
+ * ⛔ A ResponseShapeError passes through unchanged: a 2xx answer the client
+ * could not read is an unknown outcome to retry.ts (a create may have landed),
+ * and wrapping it would hide that.
  */
-function wrapError(err: unknown, method: string, path: string): BlueskyError {
-  // `_api` is populated by the time any XRPCError can exist: every call that
-  // can produce one first awaited getAgent(), which awaited atproto(). A null
-  // here therefore means a non-vendor error, which the fallback below covers.
-  if (_api && err instanceof _api.XRPCError) {
+function wrapError(err: unknown, method: string, path: string): BlueskyError | ResponseShapeError {
+  if (err instanceof ResponseShapeError) return err;
+  if (err instanceof XRPCError) {
     return new BlueskyError(
-      Number(err.status),
+      err.status,
       `${err.error ?? "Error"}: ${err.message ?? ""}`,
       method,
       path,
-      // XRPCError keeps the response headers as a lowercased map (HeadersMap),
-      // so this is the ONE client that can recover Retry-After without the
-      // Response object — and the one place it would otherwise be dropped,
-      // because everything above this line sees a BlueskyError only.
-      err.headers?.["retry-after"] ?? null,
+      // The client keeps the answer's headers as a lowercased map, so this is
+      // the ONE client that can recover Retry-After without the Response
+      // object, and the one place it would otherwise be dropped, because
+      // everything above this line sees a BlueskyError only.
+      err.headers["retry-after"] ?? null,
     );
   }
   return new BlueskyError(0, getErrorMessage(err), method, path);
 }
 
-/** The XRPC error names @atproto/api itself treats as a dead refresh token. */
+/** The XRPC error names that mean a dead refresh token (the client's own rule). */
 const DEAD_REFRESH_ERRORS = new Set(["ExpiredToken", "InvalidToken", "InvalidDID"]);
 
 /**
- * Whether a failed resume means the stored session is dead, by @atproto/api's
+ * Whether a failed resume means the stored session is dead, by the client's
  * own rule (CredentialSession's refresh: a 401, or one of the names above).
  * Anything else XRPC raises (a 5xx, a rate limit, a timeout or dropped
  * connection, which XRPC reports as status 1) says nothing about the token. A
- * non-XRPC rejection is the library refusing the session itself (a DID
- * mismatch), so it counts as dead.
+ * non-XRPC rejection is the client refusing the session itself (a DID
+ * mismatch, or a refresh answer it could not read, whose rotated token is
+ * gone with it), so it counts as dead.
  */
-function isRefusedRefresh(err: unknown, xrpcError: AtprotoApi["XRPCError"]): boolean {
-  if (!(err instanceof xrpcError)) return true;
-  // XRPC types `status` as its numeric ResponseType enum; read as the number it is,
-  // as wrapError does.
-  return Number(err.status) === 401 || DEAD_REFRESH_ERRORS.has(err.error);
+function isRefusedRefresh(err: unknown): boolean {
+  if (!(err instanceof XRPCError)) return true;
+  return err.status === 401 || DEAD_REFRESH_ERRORS.has(err.error);
 }
 
 /**
  * The fetch every Bluesky network call goes through: timeboxed on the request,
  * byte-capped on the response. The cap refuses oversize by throwing a plain
- * Error, the same failure shape the timebox's abort arrives as; @atproto's
- * XRPC client wraps either in an XRPCError of Unknown status (1), which
+ * Error, the same failure shape the timebox's abort arrives as; the XRPC
+ * client wraps either in an XRPCError of status 1 (no answer), which
  * wrapError maps to the BlueskyError every caller sees.
  */
 function timeboxedFetch(): typeof fetch {
@@ -244,7 +218,8 @@ export type BlueskySessionStore = {
 };
 
 /**
- * The session as stored: @atproto/api's session data plus the hash of the
+ * The session as stored: the XRPC client's session data (field for field what
+ * @atproto/api stored, so a row written by 0.1.0 still resumes) plus the hash of the
  * identifier it was created for (identifierHash). Optional so a row written
  * before the field existed still loads; getAgent drops such a row and logs in
  * once, and every save after that carries the hash.
@@ -277,8 +252,8 @@ export function setBlueskySessionStore(store: BlueskySessionStore | null): void 
  * would burn that budget for no reason. Every exported function
  * below only calls this when it has real work to do.
  *
- * @atproto/api refreshes the access token from the refresh token on its own
- * (CredentialSession's fetchHandler); nothing here re-implements that.
+ * The XRPC client refreshes the access token from the refresh token on its
+ * own (CredentialSession.call); nothing here re-implements that.
  *
  * Single-flighted so concurrent callers on a cold process share one login
  * rather than each opening their own session.
@@ -298,7 +273,6 @@ async function getAgent(): Promise<Agent> {
   const current = () => generation === _generation;
   // null: this attempt went obsolete, and its callers are handed the current pair's.
   const pending = (async (): Promise<Agent | null> => {
-    const { Agent, CredentialSession, XRPCError } = await atproto();
     if (!resolver) {
       throw new BlueskyError(
         0,
@@ -325,14 +299,14 @@ async function getAgent(): Promise<Agent> {
     // stored copy stays current without anyone calling save() by hand.
     // `expired` clears it: a dead refresh token must not be retried forever,
     // and a null store is what tells the next cold start to log in properly.
-    // ⛔ `network-error` leaves it alone: @atproto/api fires it when a refresh
+    // ⛔ `network-error` leaves it alone: the client fires it when a refresh
     // failed for a reason that says nothing about the token (a timeout, a PDS
     // 5xx) and keeps the session itself, so clearing the shared row there
     // would send every process that saw the blip to createSession.
     // Never allowed to reject — a storage hiccup must not fail a publish that
     // is otherwise fine.
     // Every live session saved carries the hash of the configured identifier,
-    // so a refresh (`update`, whose data @atproto/api rebuilds field by field)
+    // so a refresh (`update`, whose data the client rebuilds field by field)
     // keeps it and the next cold start still resumes.
     const identifierHash = blueskyIdentifierHash(creds.identifier);
     const session = new CredentialSession(new URL(SERVICE_URL), timeboxedFetch(), (evt, data) => {
@@ -342,7 +316,7 @@ async function getAgent(): Promise<Agent> {
       // ⛔ `.then(() => save(...))`, NOT `Promise.resolve(save(...))`. The latter
       // CALLS save() before Promise.resolve exists to wrap it, so a store that
       // throws SYNCHRONOUSLY escapes the .catch below entirely and rejects
-      // straight into @atproto/api's token-refresh path, which is exactly what
+      // straight into the client's token-refresh path, which is exactly what
       // the comment above says must never happen. An async store cannot do
       // this; a plain function that throws can.
       void Promise.resolve()
@@ -381,7 +355,7 @@ async function getAgent(): Promise<Agent> {
     }
 
     if (saved) {
-      // The hash is ours, not @atproto/api's session data.
+      // The hash is ours, not the client's session data.
       const { identifierHash: _ours, ...atpSession } = saved;
       try {
         await session.resumeSession(atpSession);
@@ -396,7 +370,7 @@ async function getAgent(): Promise<Agent> {
         // below. This runs before any create, so nothing was posted; a
         // BlueskyError(5xx) reads as "outcome unknown" to retry.ts and would make
         // publish-due fail the leg for good instead of leaving it pending.
-        if (!isRefusedRefresh(err, XRPCError)) {
+        if (!isRefusedRefresh(err)) {
           const { message } = wrapError(err, "POST", "com.atproto.server.refreshSession");
           throw new Error(`${message} (no request was sent; the stored session is kept)`, { cause: err });
         }
@@ -422,6 +396,11 @@ async function getAgent(): Promise<Agent> {
       try {
         await session.login({ identifier: creds.identifier, password: creds.password });
       } catch (err) {
+        // ⛔ A login answer that could not be read is NOT an unknown outcome:
+        // nothing was posted. As a plain Error, like the refresh failure above.
+        if (err instanceof ResponseShapeError) {
+          throw new Error(`${err.message} (no post was sent)`, { cause: err });
+        }
         throw wrapError(err, "POST", "com.atproto.server.createSession");
       }
     }
@@ -457,22 +436,21 @@ export interface RichTextResult {
 }
 
 /**
- * Detects links, mentions and hashtags the way the real Bluesky app does.
+ * Detects links, mentions, hashtags and cashtags the way the real Bluesky app
+ * does (`./bluesky-richtext.ts`), and resolves each mention to its DID.
  *
  * Without this, a link in the post body is inert text: Bluesky does not
  * autolink, it renders exactly the facets a client attaches. This is the one
  * place in the engine that produces a real one (platform-reference.md:412).
+ *
+ * ⛔ Resolving a mention is an authenticated call, so this opens the session.
+ * A mention that does not resolve stays plain text; nothing here throws past
+ * the session itself.
  */
 export async function buildRichText(text: string): Promise<RichTextResult> {
   const agent = await getAgent();
-  const { RichText } = await atproto();
-  const rt = new RichText({ text });
-  try {
-    await rt.detectFacets(agent);
-  } catch (err) {
-    throw wrapError(err, "GET", "app.bsky.richtext.detectFacets");
-  }
-  return { text: rt.text, facets: rt.facets };
+  const facets = await resolveMentions(detectFacets(text), (handle) => agent.resolveHandle(handle));
+  return { text, facets };
 }
 
 /**
@@ -525,9 +503,7 @@ export interface CreateReplyInput extends CreatePostInput {
   parent: StrongRef;
 }
 
-function buildEmbed(
-  images: PostImage[] | undefined,
-): { $type: "app.bsky.embed.images"; images: Array<{ image: BlobRef; alt: string }> } | undefined {
+function buildEmbed(images: PostImage[] | undefined): PostRecord["embed"] {
   if (!images?.length) return undefined;
   return {
     $type: "app.bsky.embed.images",
@@ -535,9 +511,34 @@ function buildEmbed(
   };
 }
 
+/** The app.bsky.feed.post lexicon's limits on what one record may carry. */
+const MAX_POST_GRAPHEMES = 300;
+const MAX_POST_BYTES = 3000;
+const MAX_POST_IMAGES = 4;
+
+/**
+ * Refuse a record the lexicon would refuse, before anything is sent.
+ *
+ * ⛔ A plain Error, never a BlueskyError: nothing reached the vendor, and a
+ * BlueskyError of status 0 reads as an unknown outcome to retry.ts, which
+ * would fail the leg as "may already be live" instead of reporting the copy.
+ */
+function assertPostFits(input: CreatePostInput): void {
+  const why =
+    graphemeCount(input.text) > MAX_POST_GRAPHEMES
+      ? `the text is ${graphemeCount(input.text)} graphemes (the limit is ${MAX_POST_GRAPHEMES})`
+      : new TextEncoder().encode(input.text).byteLength > MAX_POST_BYTES
+        ? `the text is over ${MAX_POST_BYTES} UTF-8 bytes`
+        : (input.images?.length ?? 0) > MAX_POST_IMAGES
+          ? `the post carries ${input.images!.length} images (the limit is ${MAX_POST_IMAGES})`
+          : null;
+  if (why) throw new Error(`bluesky: refusing to send a post the lexicon does not allow: ${why}. Nothing was sent.`);
+}
+
 async function post(
   input: CreatePostInput & { reply?: { root: StrongRef; parent: StrongRef } },
 ): Promise<StrongRef> {
+  assertPostFits(input);
   const agent = await getAgent();
   try {
     return await agent.post({
@@ -568,8 +569,7 @@ export async function getPosts(uris: string[]): Promise<PostView[]> {
   if (!uris.length) return [];
   const agent = await getAgent();
   try {
-    const res = await agent.getPosts({ uris });
-    return res.data.posts;
+    return await agent.getPosts(uris);
   } catch (err) {
     throw wrapError(err, "GET", "app.bsky.feed.getPosts");
   }
@@ -596,8 +596,7 @@ export async function searchPosts(query: string, limit = 20): Promise<PostView[]
   try {
     // The vendor caps `limit` at 100; clamped here rather than at the caller so
     // every consumer gets the same bound.
-    const res = await agent.app.bsky.feed.searchPosts({ q: query, limit: Math.min(limit, 100) });
-    return res.data.posts;
+    return await agent.searchPosts({ q: query, limit: Math.min(limit, 100) });
   } catch (err) {
     throw wrapError(err, "GET", "app.bsky.feed.searchPosts");
   }
@@ -622,8 +621,7 @@ export async function deleteRecord(uri: string): Promise<void> {
 export async function uploadBlob(data: Uint8Array, mimeType: string): Promise<BlobRef> {
   const agent = await getAgent();
   try {
-    const res = await agent.uploadBlob(data, { encoding: mimeType });
-    return res.data.blob;
+    return await agent.uploadBlob(data, mimeType);
   } catch (err) {
     throw wrapError(err, "POST", "com.atproto.repo.uploadBlob");
   }
@@ -657,14 +655,14 @@ export async function getProfile(actor?: string): Promise<BlueskyProfile> {
     );
   }
   try {
-    const res = await agent.getProfile({ actor: who });
+    const res = await agent.getProfile(who);
     return {
-      did: res.data.did,
-      handle: res.data.handle,
-      displayName: res.data.displayName,
-      followersCount: res.data.followersCount,
-      followsCount: res.data.followsCount,
-      postsCount: res.data.postsCount,
+      did: res.did,
+      handle: res.handle,
+      displayName: res.displayName,
+      followersCount: res.followersCount,
+      followsCount: res.followsCount,
+      postsCount: res.postsCount,
     };
   } catch (err) {
     throw wrapError(err, "GET", "app.bsky.actor.getProfile");
@@ -687,12 +685,12 @@ export async function listRecentPosts(): Promise<RecentPostsPage> {
     throw new BlueskyError(0, "the session has no did (login did not complete)", "GET", "com.atproto.repo.listRecords");
   }
   try {
-    const res = await agent.com.atproto.repo.listRecords({
+    const res = await agent.listRecords({
       repo,
       collection: "app.bsky.feed.post",
       limit: RECENT_RECORDS_LIMIT,
     });
-    const posts = res.data.records.map((r) => {
+    const posts = res.records.map((r) => {
       const value = r.value as { text?: unknown; createdAt?: unknown; reply?: unknown };
       const createdAt = typeof value.createdAt === "string" ? new Date(value.createdAt) : null;
       return {
@@ -701,7 +699,7 @@ export async function listRecentPosts(): Promise<RecentPostsPage> {
         createdAt: createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : null,
       };
     });
-    return { posts, more: Boolean(res.data.cursor) };
+    return { posts, more: Boolean(res.cursor) };
   } catch (err) {
     throw wrapError(err, "GET", "com.atproto.repo.listRecords");
   }

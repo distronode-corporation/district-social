@@ -60,7 +60,10 @@ untrusted input without the checks this file says are the application's.
 - **Complete mediation.** The SSRF check runs on every resolved address of every guarded
   request, and the request goes to the address that was checked (the pinned dispatcher), so
   a second DNS answer cannot bypass it. Every Bluesky response goes through the byte cap,
-  because the cap is in the fetch the Bluesky agent is built on (`src/bluesky.ts`).
+  because the cap is in the fetch the Bluesky client is built on (`src/bluesky.ts`), and
+  through its schema (`src/bluesky-schemas.ts`). The Bluesky client sends its session token
+  only to the entryway or to an account PDS that passes the same URL checks, and follows no
+  redirect (`src/bluesky-xrpc.ts`).
 - **Economy of mechanism.** One module each for the retry rule (`src/http/retry.ts`), the
   SSRF guard (`src/ssrf.ts`) and the byte cap (`src/read-capped.ts`), shared by every client
   rather than re-implemented per network. Four runtime dependencies (`package.json`).

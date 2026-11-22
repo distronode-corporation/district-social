@@ -45,7 +45,7 @@ const GET_POSTS_BATCH = 25;
 
 function channelRules(): TransportChannelRules {
   // 300 GRAPHEME clusters, not UTF-16 units, per the app.bsky.feed.post lexicon
-  // in the installed @atproto/api (the schema the client validates against):
+  // (the schema Bluesky validates records against, as @atproto/api 0.20.x ships it):
   //
   //     text: { type: 'string', maxLength: 3000, maxGraphemes: 300 }
   //
@@ -76,7 +76,7 @@ function channelRules(): TransportChannelRules {
     // of the supported platforms.
     //
     // 2,000,000 bytes, from the `app.bsky.embed.images` lexicon in the
-    // installed @atproto/api (`maxSize: 2000000`). Kept numerically identical
+    // @atproto/api 0.20.x lexicons (`maxSize: 2000000`). Kept numerically identical
     // to SPECS.bluesky: qa.ts reads SPECS and the publish path reads this, so the two disagreeing
     // is what produces a draft that passes QA and fails to publish.
     maxImageBytes: 2_000_000,

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * Only the session/network layer (CredentialSession, Agent) is mocked here.
- * RichText and XRPCError stay REAL: detectFacets is a pure, offline
- * computation for link-only text (it only touches the network to resolve
- * @mention handles, see rich-text.js, and none of the text below contains
- * one).
+ * Only the session/network layer (CredentialSession, Agent in
+ * bluesky-xrpc.ts) is mocked here; bluesky-xrpc.test.ts covers that layer at
+ * the fetch level. Facet detection and XRPCError stay REAL: detectFacets is a
+ * pure, offline computation for link-only text (it only touches the network
+ * to resolve @mention handles, and none of the text below contains one).
  */
 const constructedServiceUrls = vi.hoisted(() => [] as string[]);
 const mockLogin = vi.hoisted(() => vi.fn());
@@ -16,8 +16,8 @@ const mockUploadBlob = vi.hoisted(() => vi.fn());
 const mockGetProfile = vi.hoisted(() => vi.fn());
 const mockResumeSession = vi.hoisted(() => vi.fn());
 
-vi.mock("@atproto/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@atproto/api")>();
+vi.mock("../bluesky-xrpc.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../bluesky-xrpc.js")>();
 
   class MockCredentialSession {
     did?: string;
@@ -64,7 +64,7 @@ vi.mock("@atproto/api", async (importOriginal) => {
   };
 });
 
-import { XRPCError, type BlobRef } from "@atproto/api";
+import { XRPCError, type BlobRef } from "../bluesky-xrpc.js";
 import {
   BlueskyError,
   setBlueskyCredentialsResolver,
@@ -112,7 +112,7 @@ describe("bluesky client", () => {
     });
 
     it("opens exactly one session across multiple calls (lazy + cached)", async () => {
-      mockGetProfile.mockResolvedValue({ data: { did: "did:plc:x", handle: "x.bsky.social" } });
+      mockGetProfile.mockResolvedValue({ did: "did:plc:x", handle: "x.bsky.social" });
       await getProfile("did:plc:x");
       await getProfile("did:plc:x");
       await getProfile("did:plc:x");
@@ -120,14 +120,14 @@ describe("bluesky client", () => {
     });
 
     it("logs in against bsky.social, not the public AppView host", async () => {
-      mockGetProfile.mockResolvedValue({ data: { did: "did:plc:x", handle: "x.bsky.social" } });
+      mockGetProfile.mockResolvedValue({ did: "did:plc:x", handle: "x.bsky.social" });
       await getProfile("did:plc:x");
       expect(mockLogin).toHaveBeenCalledWith(CREDS);
       expect(constructedServiceUrls).toEqual(["https://bsky.social/"]);
     });
 
     it("re-opens a session after the credentials resolver is replaced", async () => {
-      mockGetProfile.mockResolvedValue({ data: { did: "did:plc:x", handle: "x.bsky.social" } });
+      mockGetProfile.mockResolvedValue({ did: "did:plc:x", handle: "x.bsky.social" });
       await getProfile("did:plc:x");
       expect(mockLogin).toHaveBeenCalledTimes(1);
       setBlueskyCredentialsResolver(async () => CREDS); // rotation: clears the cached session
@@ -179,8 +179,8 @@ describe("bluesky client", () => {
     });
 
     it("wraps a vendor rejection in a BlueskyError", async () => {
-      mockPost.mockRejectedValue(new XRPCError(400, "InvalidRequest", "text too long"));
-      await expect(createPost({ text: "x".repeat(400) })).rejects.toBeInstanceOf(BlueskyError);
+      mockPost.mockRejectedValue(new XRPCError(400, "InvalidRequest", "invalid record"));
+      await expect(createPost({ text: "x" })).rejects.toBeInstanceOf(BlueskyError);
     });
   });
 
@@ -193,9 +193,9 @@ describe("bluesky client", () => {
 
     it("passes the uris through and returns the posts array", async () => {
       const posts = [{ uri: "at://a", cid: "1" }];
-      mockGetPosts.mockResolvedValue({ data: { posts } });
+      mockGetPosts.mockResolvedValue(posts);
       const result = await getPosts(["at://a", "at://b"]);
-      expect(mockGetPosts).toHaveBeenCalledWith({ uris: ["at://a", "at://b"] });
+      expect(mockGetPosts).toHaveBeenCalledWith(["at://a", "at://b"]);
       expect(result).toBe(posts);
     });
   });
@@ -215,28 +215,26 @@ describe("bluesky client", () => {
   describe("uploadBlob", () => {
     it("uploads bytes with the given mime type and returns the blob", async () => {
       const blob = { ref: "blob-1" };
-      mockUploadBlob.mockResolvedValue({ data: { blob } });
+      mockUploadBlob.mockResolvedValue(blob);
       const data = new Uint8Array([1, 2, 3]);
       const result = await uploadBlob(data, "image/png");
-      expect(mockUploadBlob).toHaveBeenCalledWith(data, { encoding: "image/png" });
+      expect(mockUploadBlob).toHaveBeenCalledWith(data, "image/png");
       expect(result).toBe(blob);
     });
   });
 
   describe("getProfile", () => {
     it("defaults to the authenticated session's own did when no actor is given", async () => {
-      mockGetProfile.mockResolvedValue({
-        data: { did: "did:plc:testaccount000", handle: "examplebrand.bsky.social" },
-      });
+      mockGetProfile.mockResolvedValue({ did: "did:plc:testaccount000", handle: "examplebrand.bsky.social" });
       const profile = await getProfile();
-      expect(mockGetProfile).toHaveBeenCalledWith({ actor: "did:plc:testaccount000" });
+      expect(mockGetProfile).toHaveBeenCalledWith("did:plc:testaccount000");
       expect(profile).toEqual({ did: "did:plc:testaccount000", handle: "examplebrand.bsky.social" });
     });
 
     it("looks up a specific actor when one is given", async () => {
-      mockGetProfile.mockResolvedValue({ data: { did: "did:plc:other", handle: "other.bsky.social" } });
+      mockGetProfile.mockResolvedValue({ did: "did:plc:other", handle: "other.bsky.social" });
       await getProfile("did:plc:other");
-      expect(mockGetProfile).toHaveBeenCalledWith({ actor: "did:plc:other" });
+      expect(mockGetProfile).toHaveBeenCalledWith("did:plc:other");
     });
   });
 });
@@ -352,9 +350,7 @@ describe("bluesky session persistence", () => {
   beforeEach(() => {
     mockLogin.mockReset().mockResolvedValue(undefined);
     mockResumeSession.mockReset().mockResolvedValue(undefined);
-    mockGetProfile.mockReset().mockResolvedValue({
-      data: { did: "did:plc:test", handle: "example.com" },
-    });
+    mockGetProfile.mockReset().mockResolvedValue({ did: "did:plc:test", handle: "example.com" });
     setBlueskyCredentialsResolver(async () => CREDS);
   });
 
@@ -368,7 +364,7 @@ describe("bluesky session persistence", () => {
 
     await getProfile("did:plc:test");
 
-    // @atproto/api gets its own session data, never our hash.
+    // The XRPC client gets its own session data, never our hash.
     expect(mockResumeSession).toHaveBeenCalledWith(ATP_SESSION);
     // The whole point. A login here would spend one of ten daily.
     expect(mockLogin).not.toHaveBeenCalled();
