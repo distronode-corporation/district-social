@@ -13,8 +13,10 @@ to propose a new one.
   next version.
 - **Drop the zod override** ([#6](https://github.com/distronode-corporation/district-social/issues/6)).
   `overrides.zod` lifts the zod that `@atproto/api` pulls in to 4.6.6, the fix for
-  GHSA-mrhx-c7xc-m3w5, outside the `^3` range the @atproto packages declare. It goes once
-  `@atproto/api` admits a fixed zod.
+  GHSA-mrhx-c7xc-m3w5, outside the `^3` range the @atproto packages declare. It covers this
+  repository's installs only: npm does not pass overrides to consumers of the published
+  package, who keep zod 3 and the 5 MiB response cap. It goes once `@atproto/api` admits a
+  fixed zod.
 - **Lint and type-check settings back at the scaffold's**
   ([#3](https://github.com/distronode-corporation/district-social/issues/3)). The seed code
   was written against looser settings, so some TypeScript options and typescript-eslint rules
