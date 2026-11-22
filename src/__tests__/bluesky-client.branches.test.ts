@@ -770,6 +770,48 @@ describe("persisting the session", () => {
   });
 
   /**
+   * ⛔ AN EXPIRED SESSION TAKES ITS CACHED AGENT WITH IT. The client clears its
+   * session when a refresh is refused; an agent left cached over it would fail
+   * every later call ("Not logged in") until a restart. The next call logs in
+   * (or resumes) again instead.
+   */
+  it("drops the cached agent when its session expires, so the next call opens a new one", async () => {
+    await openSession();
+    expect(h.login).toHaveBeenCalledTimes(1);
+
+    h.persistHandlers[0]!("expired", undefined);
+    await getProfile("did:plc:someone");
+
+    expect(h.login).toHaveBeenCalledTimes(2);
+    expect(h.persistHandlers).toHaveLength(2);
+  });
+
+  it("keeps the cached agent on every other session event", async () => {
+    await openSession();
+
+    for (const evt of ["update", "network-error", "create"]) h.persistHandlers[0]!(evt, undefined);
+    await getProfile("did:plc:someone");
+
+    expect(h.login).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * An expiry from a session that is not the cached one (an obsolete attempt,
+   * or one replaced since) leaves the current agent alone.
+   */
+  it("does not drop the current agent when an older session expires", async () => {
+    await openSession();
+    const old = h.persistHandlers[0]!;
+    setBlueskyCredentialsResolver(async () => CREDS);
+    await openSession();
+
+    old("expired", undefined);
+    await getProfile("did:plc:someone");
+
+    expect(h.login).toHaveBeenCalledTimes(2);
+  });
+
+  /**
    * ⚠️ A create event with no data is not "keep what you had": it is a session
    * we cannot reconstruct. Storing `undefined` would hand the next cold start
    * an unusable record instead of telling it to log in.
@@ -1339,7 +1381,7 @@ describe("a post the lexicon does not allow", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(BlueskyError);
     expect((err as Error).message).toBe(
-      `bluesky: refusing to send a post the lexicon does not allow: ${why}. Nothing was sent.`,
+      `bluesky: refusing to send a post the lexicon does not allow: ${why}. No post was sent.`,
     );
     expect(isUnknownOutcome(err)).toBe(false);
     expect(h.login).not.toHaveBeenCalled();

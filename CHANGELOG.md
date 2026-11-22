@@ -50,7 +50,7 @@ in the version bump, before the tag.
     with an upper-case scheme (`HTTPS://EXAMPLE.COM/x`) is linked, with its scheme and host
     lower-cased, instead of left as plain text.
   - A post over 300 graphemes or 3000 UTF-8 bytes, or with more than four images, is refused
-    before anything is sent.
+    before the post is sent.
   - New runtime dependencies: `zod` 4.6.6 (the schemas) and `tlds` 1.261.0 (the domain list
     facet detection checks against). NOTICE credits the AT Protocol code the client derives
     from.

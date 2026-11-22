@@ -317,6 +317,10 @@ async function getAgent(): Promise<Agent> {
     // keeps it and the next cold start still resumes.
     const identifierHash = blueskyIdentifierHash(creds.identifier);
     const session = new CredentialSession(new URL(SERVICE_URL), timeboxedFetch(), (evt, data) => {
+      // ⛔ An expired session takes its cached agent with it: the client has
+      // cleared the session, and an agent cached over it would fail every
+      // later call until a restart. The next call resumes or logs in again.
+      if (evt === "expired" && _agent?.sessionManager === session) _agent = null;
       if (!store || evt === "network-error") return;
       const live = evt === "create" || evt === "update" ? data : undefined;
       const next: StoredBlueskySession | null = live ? { ...live, identifierHash } : null;
@@ -528,7 +532,8 @@ const MAX_POST_BYTES = 3000;
 const MAX_POST_IMAGES = 4;
 
 /**
- * Refuse a record the lexicon would refuse, before anything is sent.
+ * Refuse a record the lexicon would refuse, before the post is sent. (The
+ * transport uploads a post's images first, so those may already be up.)
  *
  * ⛔ A plain Error, never a BlueskyError: nothing reached the vendor, and a
  * BlueskyError of status 0 reads as an unknown outcome to retry.ts, which
@@ -543,7 +548,7 @@ function assertPostFits(input: CreatePostInput): void {
         : (input.images?.length ?? 0) > MAX_POST_IMAGES
           ? `the post carries ${input.images!.length} images (the limit is ${MAX_POST_IMAGES})`
           : null;
-  if (why) throw new Error(`bluesky: refusing to send a post the lexicon does not allow: ${why}. Nothing was sent.`);
+  if (why) throw new Error(`bluesky: refusing to send a post the lexicon does not allow: ${why}. No post was sent.`);
 }
 
 async function post(
