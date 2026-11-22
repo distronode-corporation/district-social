@@ -32,7 +32,6 @@ export default tseslint.config(
       // turn back on once its findings are fixed.
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-enum-comparison": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/require-await": "off",
       "preserve-caught-error": "off",

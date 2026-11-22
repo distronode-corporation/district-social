@@ -35,6 +35,12 @@ in the version bump, before the tag.
 
 ### Fixed
 
+- zod advisory GHSA-mrhx-c7xc-m3w5 (memory exhaustion while validating a large array), in
+  this repository's own installs and CI: an override lifts the zod the @atproto packages pull
+  in to 4.6.6, and the dependency review no longer allows the advisory. npm does not apply a
+  package's overrides to its consumers, so an install of the published package still resolves
+  zod 3 through `@atproto/api`'s `^3.23.8`. For them the 5 MiB cap on Bluesky responses, which
+  stays, is the control, and #6 stays open until `@atproto/api` admits a fixed zod.
 - A Bluesky session still opening when the credentials resolver or the session store is
   replaced is no longer cached or returned, and no longer writes to the store.
 - Linear time on long input: the trailing delimiter trim when a link leaves a long line, the

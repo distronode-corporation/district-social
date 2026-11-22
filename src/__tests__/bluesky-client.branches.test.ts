@@ -344,12 +344,11 @@ describe("the request timebox", () => {
 });
 
 /**
- * ⛔ The response byte cap is the compensating control for the nested zod
- * advisory (GHSA-mrhx-c7xc-m3w5), ACCEPTED with this bound because no
- * in-range fix exists: the @atproto chain pins zod 3.x and the fix is only in
- * 4.6.6. The advisory names memory exhaustion from a crafted response, and
- * the only host this wrapper ever dials is the hard-coded bsky.social
- * AppView, so the cap is what bounds that vector. Like the timebox above, it
+ * ⛔ The response byte cap is defence in depth behind the zod fix for
+ * GHSA-mrhx-c7xc-m3w5 (`overrides.zod`, 4.6.6). That advisory named memory
+ * exhaustion from a crafted response, and the only host this wrapper ever
+ * dials is the hard-coded bsky.social AppView, so the cap bounds that whole
+ * class whatever the parser does. Like the timebox above, it
  * lives in the wrapped fetch so session management calls are covered too, not
  * just data calls.
  *
