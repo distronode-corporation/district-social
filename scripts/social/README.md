@@ -225,11 +225,9 @@ anthropic-wif.ts        Claude by workload identity federation
 media.ts                media analysis (ffprobe) and per-platform upload
 ```
 
-⚠️ `bluesky.ts` loads `@atproto/api` lazily on purpose. Its dependency
-`multiformats` exports `./cid` under an `import` condition only, and a CLI
-that runs through tsx in a CommonJS package crashed every command at load with
-`ERR_PACKAGE_PATH_NOT_EXPORTED` under a static import. Bundlers (Next, vitest)
-never notice because they bundle ESM. Keep it lazy.
+`bluesky.ts` runs on the engine's own XRPC client (`bluesky-xrpc.ts`), with
+facet detection in `bluesky-richtext.ts` and response schemas in
+`bluesky-schemas.ts`. There is no `@atproto/api` and no lazy import any more.
 
 ## Running the engine in process: `wireEngineEnv` and Claude auth
 

@@ -43,9 +43,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.7.0",
-    "@atproto/api": "0.20.44",
     "google-auth-library": "11.3.1",
-    "undici": "7.30.2"
+    "tlds": "1.261.0",
+    "undici": "7.30.2",
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -60,7 +61,6 @@
     "vitest": "5.1.0"
   },
   "overrides": {
-    "minimatch": "11.0.5",
-    "zod": "4.6.6"
+    "minimatch": "11.0.5"
   }
 }

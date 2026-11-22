@@ -58,15 +58,18 @@ untrusted input without the checks this file says are the application's.
   leg before anything is sent (`src/media-fetch.ts`). A stored Bluesky session for another
   identifier is dropped, not resumed (`src/bluesky.ts`). A create whose outcome is unknown
   (a timeout or a 5xx) is reported as unknown, never re-sent (`src/http/retry.ts`).
-- **Complete mediation.** Every successful response from X, Reddit, Pinterest, LinkedIn,
-  Threads, Facebook, Instagram, TikTok, YouTube, Zernio and Vertex AI is read through the
-  same field readers before any value reaches the engine (below). The SSRF check runs on every resolved address of every guarded
-  request, and the request goes to the address that was checked (the pinned dispatcher), so
+- **Complete mediation.** Every successful response from every network client is checked
+  field by field before any value reaches the engine (below). The SSRF check runs on every
+  resolved address of every guarded request, and the request goes to the address that was checked (the pinned dispatcher), so
   a second DNS answer cannot bypass it. Every Bluesky response goes through the byte cap,
-  because the cap is in the fetch the Bluesky agent is built on (`src/bluesky.ts`).
+  because the cap is in the fetch the Bluesky client is built on (`src/bluesky.ts`), and
+  through its schema (`src/bluesky-schemas.ts`). The Bluesky client sends its session token
+  only to the entryway or to an account PDS that passes the same URL checks, and follows no
+  redirect (`src/bluesky-xrpc.ts`).
 - **Economy of mechanism.** One module each for the retry rule (`src/http/retry.ts`), the
   SSRF guard (`src/ssrf.ts`), the byte cap (`src/read-capped.ts`) and the response readers
-  (`src/http/shape.ts`), shared by every client rather than re-implemented per network. Four runtime dependencies (`package.json`).
+  and their error (`src/http/shape.ts`), shared by every client rather than re-implemented
+  per network. Five runtime dependencies (`package.json`).
 - **Open design.** The whole library, its tests and its release pipeline are public; nothing
   depends on the code being secret.
 
@@ -97,8 +100,10 @@ What the library leaves to the application, and does not counter itself:
 
 ## Responses are validated field by field
 
-Every network client reads a successful (2xx) response through the readers in
-`src/http/shape.ts`, one per field it uses, instead of casting the parsed JSON to a type.
+Every network client reads a successful (2xx) response field by field instead of casting
+the parsed JSON to a type: Bluesky through its schemas in `src/bluesky-schemas.ts`, every
+other client through the readers in `src/http/shape.ts`, one per field it uses. Both throw
+the same `ResponseShapeError`.
 
 - **What is checked.** Each field a client reads is checked for presence (where the code
   needs it) and type: an object, an array, a string, a non-empty string for an id or a URL,
@@ -111,8 +116,8 @@ Every network client reads a successful (2xx) response through the readers in
   `null` one is left out. The one zero result is deliberate: LinkedIn's per-post statistics,
   asked for one post by its urn, answer with no element for that post when it has no
   activity, and that reads as zero counters; `elements` missing or `null` reads as
-  unavailable (`{}`). X, Reddit,
-  TikTok, YouTube and Zernio refuse a counter that is not a finite number. The Meta insights
+  unavailable (`{}`). X, Reddit, TikTok, YouTube and Zernio refuse a counter that is not a
+  finite number. The Meta insights
   family (Facebook, Instagram, Threads) refuses a value that is neither a number nor a
   breakdown object, and leaves a breakdown out of the bag. Zernio ignores a non-counter field
   beside its documented counters. The LinkedIn and Pinterest metric bags keep a value only
@@ -135,14 +140,13 @@ Every network client reads a successful (2xx) response through the readers in
   decoded leniently: each field of the vendor's error is kept only when it has the right
   type, and the HTTP status still reports the failure. Those error messages carry the
   vendor's own error text, as before.
-- **Covered clients.** X, Reddit, Pinterest, LinkedIn, Threads, the Meta Graph API
-  (Facebook and Instagram), TikTok, YouTube (the Data and Analytics APIs), Zernio and Vertex
-  AI (Veo). Bluesky is covered by a separate change that replaces `@atproto/api` with direct
-  XRPC calls and validates its responses with schemas that throw the same
-  `ResponseShapeError`; until that change lands, Bluesky responses are read through the
-  `@atproto/api` client. A model reply is held to its requested JSON schema by structured
+- **Covered clients.** Bluesky (its own XRPC client, `src/bluesky-xrpc.ts`, with the
+  schemas in `src/bluesky-schemas.ts`), X, Reddit, Pinterest, LinkedIn, Threads, the Meta
+  Graph API (Facebook and Instagram), TikTok, YouTube (the Data and Analytics APIs), Zernio
+  and Vertex AI (Veo). A model reply is held to its requested JSON schema by structured
   output (`src/claude.ts`), not by these readers.
-- **Where it is tested.** `src/http/__tests__/shape.test.ts` tests each reader;
+- **Where it is tested.** `src/http/__tests__/shape.test.ts` tests each reader, and the
+  Bluesky client tests its schemas;
   `src/__tests__/hostile-responses.test.ts` takes a valid fixture for each endpoint and
   replaces every field in turn with a hostile value (removed, `null`, a number, a boolean, a
   huge string, a nested array, an object), requiring a clean refusal or a clean read and
