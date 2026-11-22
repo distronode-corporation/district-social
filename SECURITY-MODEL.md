@@ -86,7 +86,7 @@ Mapped to the CWE Top 25 and the OWASP Top 10 where they apply to a library like
 | Code injection (CWE-94) | No `eval` and no `Function` constructor in the code; typescript-eslint's `no-implied-eval` runs in CI | `npm run lint` |
 | OS command injection (CWE-78) | The library starts no processes (no `child_process`) | Source |
 | Deserialization of untrusted data (CWE-502) | Untrusted data is parsed only with `JSON.parse`, which builds plain data and runs no code; a body that is not JSON is an error, not a guess | The client tests per network, for example `src/__tests__/reddit-client.test.ts` |
-| Improper input validation (CWE-20) | Every field a client reads from a successful network response is checked for presence and type, and against its documented values where the code acts on them, by the readers in `src/http/shape.ts`; anything else throws `ResponseShapeError` (details below) | `src/http/__tests__/shape.test.ts`, `src/__tests__/hostile-responses.test.ts` and the client tests per network |
+| Improper input validation (CWE-20) | Every field a client reads from a successful network response is checked for presence and type (one exception, Bluesky's record values, is named below), and against its documented values where the code acts on them, by the readers in `src/http/shape.ts`; anything else throws `ResponseShapeError` (details below) | `src/http/__tests__/shape.test.ts`, `src/__tests__/hostile-responses.test.ts` and the client tests per network |
 | Missing authorization (CWE-862) | Publishing needs an approval the library cannot grant, single-use and bound to the exact renders (`src/ports.ts`); the application must consume it before `publishDraft` | `src/__tests__/ports.test.ts` |
 | Duplicate side effects on retry | A create is retried only after a rejection (such as a 429), never after an unknown outcome | `src/http/__tests__/retry.test.ts` |
 
@@ -128,7 +128,10 @@ the same `ResponseShapeError`.
   field never breaks a publish. Lengths are not capped field by field; the time and byte
   bounds on reads apply to the whole response. The websocket announcement for a Reddit
   image post is checked by type in `src/reddit.ts`, and a malformed one is reported as an
-  unknown outcome.
+  unknown outcome. The one exception to type checking: a Bluesky record's `value` from
+  `com.atproto.repo.listRecords` is checked only as an object, and the recent-posts read
+  (`src/bluesky.ts`) uses its `text` and `createdAt` only when they are strings and skips
+  them otherwise, without an error, so a malformed record reads as a post with no text.
 - **What a refusal looks like.** A field that fails throws `ResponseShapeError`, naming the
   vendor, the operation, the field's path and the kind of value found ("a number", "null",
   "missing"), never the value itself. An object key that came from the response is
