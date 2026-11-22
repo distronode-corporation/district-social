@@ -643,7 +643,7 @@ describe("opening the session", () => {
     h.login.mockRejectedValueOnce(new XRPCError(502, "UpstreamFailure", "pds down"));
     h.post.mockResolvedValue({ uri: "at://did:plc:x/app.bsky.feed.post/ok", cid: "cid-1" });
 
-    await expect(createPost({ text: "first" })).rejects.toThrow(BlueskyError);
+    await expect(createPost({ text: "first" })).rejects.toThrow(/pds down \(no post was sent\)/);
     // ⚠️ A cached failed agent would wedge the process until a redeploy. The
     // second attempt must reach the vendor.
     await expect(createPost({ text: "second" })).resolves.toEqual({
@@ -1279,6 +1279,31 @@ describe("answers the client could not read", () => {
 
     expect(got).toBe(err);
     expect(isUnknownOutcome(got)).toBe(true);
+  });
+
+  it.each([
+    ["no answer (a timeout)", new XRPCError(1, "Unknown", "The operation was aborted due to timeout")],
+    ["a 5xx", new XRPCError(503, "NotEnoughResources", "overloaded")],
+  ])("turns a login that failed on %s into a plain Error that is not an unknown outcome", async (_label, cause) => {
+    h.login.mockRejectedValue(cause);
+
+    const got = await createPost({ text: "hello" }).catch((e: unknown) => e);
+
+    expect(got).not.toBeInstanceOf(BlueskyError);
+    expect((got as Error).message).toMatch(/^Bluesky POST com\.atproto\.server\.createSession -> \d+: .+ \(no post was sent\)$/);
+    expect((got as Error).cause).toBe(cause);
+    expect(isUnknownOutcome(got)).toBe(false);
+    expect(h.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps a refused login (a 4xx) a BlueskyError, which retry.ts reads as a decision", async () => {
+    h.login.mockRejectedValue(new XRPCError(401, "AuthenticationRequired", "Invalid identifier or password"));
+
+    const got = (await createPost({ text: "hello" }).catch((e: unknown) => e)) as BlueskyError;
+
+    expect(got).toBeInstanceOf(BlueskyError);
+    expect(got.status).toBe(401);
+    expect(isUnknownOutcome(got)).toBe(false);
   });
 
   it("turns a login's shape error into a plain Error that is not an unknown outcome", async () => {

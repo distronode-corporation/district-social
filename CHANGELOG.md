@@ -63,6 +63,9 @@ in the version bump, before the tag.
   outcome, the same as on every other network: it reported a status the retry rules read as
   a definite failure, so the leg stayed pending and the post could go out a second time on
   the next run.
+- A Bluesky login that fails with no answer or a 5xx, before any post is sent, no longer
+  reads as an unknown outcome, so the leg stays pending instead of being marked as possibly
+  live.
 - A Bluesky session still opening when the credentials resolver or the session store is
   replaced is no longer cached or returned, and no longer writes to the store.
 - Linear time on long input: the trailing delimiter trim when a link leaves a long line, the

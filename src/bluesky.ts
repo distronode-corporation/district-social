@@ -36,6 +36,7 @@ import {
 } from "./bluesky-xrpc.js";
 import { detectFacets, resolveMentions } from "./bluesky-richtext.js";
 import { ResponseShapeError } from "./http/shape.js";
+import { isUnknownOutcome } from "./http/retry.js";
 import { graphemeCount } from "./length.js";
 
 export type { StrongRef, Facet, PostView };
@@ -402,12 +403,16 @@ async function getAgent(): Promise<Agent> {
       try {
         await session.login({ identifier: creds.identifier, password: creds.password });
       } catch (err) {
-        // ⛔ A login answer that could not be read is NOT an unknown outcome:
-        // nothing was posted. As a plain Error, like the refresh failure above.
-        if (err instanceof ResponseShapeError) {
-          throw new Error(`${err.message} (no post was sent)`, { cause: err });
+        // ⛔ A FAILED LOGIN IS NOT AN UNKNOWN OUTCOME: it runs before any create,
+        // so nothing was posted. A failure retry.ts would read as one (no
+        // answer, a 5xx, or a login answer that could not be read) is thrown as
+        // a plain Error, like the refresh failure above, so publish-due leaves
+        // the leg pending. A refusal (a 4xx, a rate limit) stays a BlueskyError.
+        const wrapped = wrapError(err, "POST", "com.atproto.server.createSession");
+        if (isUnknownOutcome(wrapped)) {
+          throw new Error(`${wrapped.message} (no post was sent)`, { cause: err });
         }
-        throw wrapError(err, "POST", "com.atproto.server.createSession");
+        throw wrapped;
       }
     }
 
