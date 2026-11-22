@@ -34,6 +34,11 @@ npm run build       # tsc -p tsconfig.build.json, the dist/ that release.yml pub
 npm test            # vitest run --coverage, thresholds at 100 percent
 ```
 
+The build is repeatable. The `typecheck` job packs the package, deletes `dist/`, builds and
+packs it again, and fails unless the two tarballs have the same sha256. npm pack fixes every
+file's timestamp in the tarball, so a change that makes the output depend on the time or the
+machine is what breaks it.
+
 The other workflows run checks that need no setup on your side: CodeQL, OpenSSF Scorecard,
 dependency review, zizmor on the workflows, gitleaks on the history, and a licence allowlist
 over `package-lock.json` (`node .github/scripts/check-licenses.mjs --self-test`, then

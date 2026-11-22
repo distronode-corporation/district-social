@@ -76,7 +76,9 @@ jobs:
       - run: npm run typecheck
       # The package release.yml publishes is this build; it must compile too.
       - run: npm run build
-      # The build is repeatable: a second build from the same commit packs to the same bytes.
+      # The build is repeatable: a second build from the same commit, with dist/ deleted first,
+      # packs to a tarball with the same sha256. npm pack fixes every entry's mtime, so no
+      # SOURCE_DATE_EPOCH is needed. Both sums go to the log.
       - name: repeatable build
         run: |
           mkdir -p "$RUNNER_TEMP/first" "$RUNNER_TEMP/second"
@@ -84,7 +86,14 @@ jobs:
           rm -rf dist
           npm run build
           npm pack --pack-destination "$RUNNER_TEMP/second"
-          cmp "$RUNNER_TEMP"/first/*.tgz "$RUNNER_TEMP"/second/*.tgz
+          first="$(sha256sum "$RUNNER_TEMP"/first/*.tgz | cut -d' ' -f1)"
+          second="$(sha256sum "$RUNNER_TEMP"/second/*.tgz | cut -d' ' -f1)"
+          echo "first pack:  $first"
+          echo "second pack: $second"
+          if [ "$first" != "$second" ]; then
+            echo "::error::npm pack is not repeatable: the two tarballs differ"
+            exit 1
+          fi
 
   test:
     # The ruleset requires a check named exactly `test`, so the .nvmrc leg keeps that name
