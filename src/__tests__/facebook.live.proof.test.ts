@@ -163,12 +163,12 @@ describe.runIf(enabled)("facebook transport live proof", () => {
 
     // Step 1: it exists, read back from Meta rather than from the publish response.
     const { pageToken, appSecret } = await creds();
-    const read = await graphRequest<{ id: string }>(posted.ref, {
+    const read = await graphRequest(posted.ref, {
       params: { fields: "id" },
       accessToken: pageToken,
       appSecret,
     });
-    expect(read.id).toBe(posted.ref);
+    expect(read).toMatchObject({ id: posted.ref });
     const factsBefore = await facebookTransport.postFacts([posted.ref]);
     expect(factsBefore.get(posted.ref)).toMatchObject({ state: "PUBLISHED", released: true });
 
@@ -183,7 +183,7 @@ describe.runIf(enabled)("facebook transport live proof", () => {
     // must fail with Meta's not-found wording; a timeout or a rate limit also
     // throws, and neither is evidence of a deletion.
     await expect(
-      graphRequest<{ id: string }>(posted.ref, { params: { fields: "id" }, accessToken: pageToken, appSecret }),
+      graphRequest(posted.ref, { params: { fields: "id" }, accessToken: pageToken, appSecret }),
     ).rejects.toThrow(/does not exist|cannot be loaded/i);
   });
 
@@ -238,7 +238,7 @@ describe.runIf(enabled)("facebook transport live proof", () => {
       const { postId, photoId } = splitRef(posted.ref);
       const { pageToken, appSecret } = await creds();
       const read = (id: string) =>
-        graphRequest<{ id: string }>(id, { params: { fields: "id" }, accessToken: pageToken, appSecret });
+        graphRequest(id, { params: { fields: "id" }, accessToken: pageToken, appSecret });
 
       try {
         // The transport must have recorded the photo id at all. Without this,
@@ -247,8 +247,8 @@ describe.runIf(enabled)("facebook transport live proof", () => {
 
         // Step 1: BOTH objects exist, read back from Meta rather than from our
         // own publish response.
-        expect((await read(postId)).id).toBe(postId);
-        expect((await read(photoId!)).id).toBe(photoId);
+        expect(await read(postId)).toMatchObject({ id: postId });
+        expect(await read(photoId!)).toMatchObject({ id: photoId });
         console.log(`[proof] photo post live: story ${postId}, photo ${photoId}`);
 
         // Step 2: one deletePost call, which must cover both.

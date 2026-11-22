@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ResponseShapeError } from "../http/shape.js";
+import { isUnknownOutcome } from "../http/retry.js";
 
 /**
  * The half of threads.ts a caller only meets when something went wrong, and the
@@ -257,14 +259,15 @@ describe("createContainer alt text", () => {
 describe("publishContainer refuses an id-less success", () => {
   it("throws rather than handing the chain an undefined parent id", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({}));
-    await expect(publishContainer("container-1")).rejects.toThrow(/publish returned no id/);
+    await expect(publishContainer("container-1")).rejects.toThrow(/threads_publish: unexpected response shape at id: expected a non-empty string, got missing/);
   });
 
   it("throws for a 200 that only echoes something unrelated", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ success: true }));
     const err = await publishContainer("container-1").catch((e) => e);
-    expect(err).toBeInstanceOf(ThreadsError);
-    expect(err.status).toBe(0);
+    // A shape error, which retry.ts counts as an unknown outcome: the publish may have landed.
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    expect(isUnknownOutcome(err)).toBe(true);
   });
 });
 

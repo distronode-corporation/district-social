@@ -22,14 +22,17 @@ import {
   getFacebookFollowers,
   getFacebookPageInsights,
   getFacebookPostInsights,
+  graphBody,
   graphRequest,
   metaCredentials,
+  metaShape,
   MetaGraphError,
+  readInsightRows,
   ruploadHostedVideo,
   toMetricBag,
   type MetaCredentials,
-  type MetaInsightRow,
 } from "./meta-graph.js";
+import type { Shape } from "./http/shape.js";
 import { PublishPreflightError } from "./publish.js";
 import type {
   DirectConnectStatus,
@@ -232,12 +235,16 @@ export const FB_REEL_METRICS = [
 async function connectStatus(): Promise<DirectConnectStatus> {
   try {
     const creds = await metaCredentials();
-    const page = await graphRequest<{ id: string; name: string }>(creds.pageId, {
-      params: { fields: "id,name" },
-      accessToken: creds.pageToken,
-      appSecret: creds.appSecret,
-    });
-    return { connected: true, accountId: page.id, displayName: page.name };
+    const s = metaShape("GET :page-id?fields=id,name");
+    const page = graphBody(
+      s,
+      await graphRequest(creds.pageId, {
+        params: { fields: "id,name" },
+        accessToken: creds.pageToken,
+        appSecret: creds.appSecret,
+      }),
+    );
+    return { connected: true, accountId: s.id(page.id, "id"), displayName: s.str(page.name, "name") };
   } catch (err) {
     // A transport that cannot report status must not throw: publish.ts's
     // directConnectedAccounts() treats the whole platform as unreachable and
@@ -407,13 +414,36 @@ function reelPublished(s: ReelStatus): boolean {
   return s.publishing_phase?.status === "complete" || s.publishing_phase?.publish_status === "published";
 }
 
+/** One Reel phase, each field an optional string; `error` an optional object. */
+function readReelPhase(s: Shape, value: unknown, at: string): ReelPhase | undefined {
+  const phase = s.optObj(value, at);
+  if (!phase) return undefined;
+  const error = s.optObj(phase.error, `${at}.error`);
+  return {
+    status: s.optStr(phase.status, `${at}.status`),
+    publish_status: s.optStr(phase.publish_status, `${at}.publish_status`),
+    ...(error ? { error: { message: s.optStr(error.message, `${at}.error.message`) } } : {}),
+  };
+}
+
 async function readReelStatus(videoId: string, creds: MetaCredentials): Promise<ReelStatus> {
-  const { status } = await graphRequest<{ status?: ReelStatus }>(videoId, {
-    params: { fields: "status" },
-    accessToken: creds.pageToken,
-    appSecret: creds.appSecret,
-  });
-  return status ?? {};
+  const s = metaShape("GET :video-id?fields=status");
+  const body = graphBody(
+    s,
+    await graphRequest(videoId, {
+      params: { fields: "status" },
+      accessToken: creds.pageToken,
+      appSecret: creds.appSecret,
+    }),
+  );
+  const status = s.optObj(body.status, "status");
+  if (!status) return {};
+  return {
+    video_status: s.optStr(status.video_status, "status.video_status"),
+    uploading_phase: readReelPhase(s, status.uploading_phase, "status.uploading_phase"),
+    processing_phase: readReelPhase(s, status.processing_phase, "status.processing_phase"),
+    publishing_phase: readReelPhase(s, status.publishing_phase, "status.publishing_phase"),
+  };
 }
 
 /**
@@ -465,13 +495,17 @@ async function publishReel(
   description: string,
   creds: MetaCredentials,
 ): Promise<{ ref: string; warnings?: string[] }> {
-  const start = await graphRequest<{ video_id?: string; upload_url?: string }>(`${creds.pageId}/video_reels`, {
-    method: "POST",
-    params: { upload_phase: "start" },
-    accessToken: creds.pageToken,
-    appSecret: creds.appSecret,
-  });
-  const videoId = start.video_id;
+  const startShape = metaShape("POST :page-id/video_reels start");
+  const start = graphBody(
+    startShape,
+    await graphRequest(`${creds.pageId}/video_reels`, {
+      method: "POST",
+      params: { upload_phase: "start" },
+      accessToken: creds.pageToken,
+      appSecret: creds.appSecret,
+    }),
+  );
+  const videoId = startShape.optId(start.video_id, "video_id");
   if (!videoId) {
     throw new Error("facebook: the Reels upload session started but returned no video_id, so there is nothing to upload to");
   }
@@ -485,7 +519,9 @@ async function publishReel(
     );
   }
 
-  await graphRequest<{ success?: boolean }>(`${creds.pageId}/video_reels`, {
+  // The finish answer is not read beyond its envelope (`success` is not
+  // documented as always present); the status poll below is the verdict.
+  await graphRequest(`${creds.pageId}/video_reels`, {
     method: "POST",
     params: { upload_phase: "finish", video_id: videoId, video_state: "PUBLISHED", description },
     accessToken: creds.pageToken,
@@ -540,7 +576,8 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
   if (video) {
     ({ ref, warnings } = await publishReel(video, render.content, creds));
   } else if (images.length === 1) {
-    const photo = await graphRequest<{ id?: string; post_id?: string }>(`${creds.pageId}/photos`, {
+    const photoShape = metaShape("POST :page-id/photos");
+    const photoBody = await graphRequest(`${creds.pageId}/photos`, {
       method: "POST",
       // `alt_text_custom` is the Page-photo field for accessible alt text,
       // VERIFIED against developers.facebook.com/docs/graph-api: "Accessible
@@ -559,6 +596,11 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
       accessToken: creds.pageToken,
       appSecret: creds.appSecret,
     });
+    const photoFields = graphBody(photoShape, photoBody);
+    const photo = {
+      id: photoShape.optId(photoFields.id, "id"),
+      post_id: photoShape.optId(photoFields.post_id, "post_id"),
+    };
     if (!photo.post_id) {
       // The photos edge's documented return shape carries `post_id` for a
       // newly published photo; without it there is no post-shaped ref this
@@ -589,13 +631,17 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
   } else {
     // No image resolved (either none was attached, or the only candidate had
     // no fetchable public url) — text-only post.
-    const post = await graphRequest<{ id: string }>(`${creds.pageId}/feed`, {
-      method: "POST",
-      params: { message: render.content },
-      accessToken: creds.pageToken,
-      appSecret: creds.appSecret,
-    });
-    ref = post.id;
+    const feedShape = metaShape("POST :page-id/feed");
+    const post = graphBody(
+      feedShape,
+      await graphRequest(`${creds.pageId}/feed`, {
+        method: "POST",
+        params: { message: render.content },
+        accessToken: creds.pageToken,
+        appSecret: creds.appSecret,
+      }),
+    );
+    ref = feedShape.id(post.id, "id");
   }
 
   const result: DirectPublishResult = { ref, url: postUrl(ref), ...(warnings ? { warnings } : {}) };
@@ -620,7 +666,8 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
 /** A real comment on the post object — NOT the same mechanism as a Threads reply. */
 async function postComment(rawRef: string, text: string): Promise<void> {
   const creds = await metaCredentials();
-  await graphRequest<{ id: string }>(`${parseRef(rawRef).postId}/comments`, {
+  // The new comment's id is not used; the envelope check is the whole read.
+  await graphRequest(`${parseRef(rawRef).postId}/comments`, {
     method: "POST",
     params: { message: text },
     accessToken: creds.pageToken,
@@ -677,11 +724,14 @@ function isMetaNotFound(err: unknown): boolean {
  */
 async function deleteGraphObject(id: string, creds: MetaCredentials): Promise<void> {
   try {
-    await graphRequest<{ success: boolean }>(id, {
+    // The answer is `{ success: true }`; a `false` is refused, because the caller reports success.
+    const s = metaShape("DELETE :id");
+    const res = graphBody(s, await graphRequest(id, {
       method: "DELETE",
       accessToken: creds.pageToken,
       appSecret: creds.appSecret,
-    });
+    }));
+    if (s.optBool(res.success, "success") === false) s.fail("success", "true", false);
   } catch (err) {
     if (!isMetaNotFound(err)) throw err;
     // Idempotent: already gone is success, but only once the answer is about
@@ -712,11 +762,18 @@ async function whyNotGone(id: string, creds: MetaCredentials): Promise<string | 
     return `it belongs to Page ${id.slice(0, sep)}, not the configured Page ${creds.pageId}`;
   }
   try {
-    await graphRequest<{ id: string }>(creds.pageId, {
-      params: { fields: "id" },
-      accessToken: creds.pageToken,
-      appSecret: creds.appSecret,
-    });
+    const s = metaShape("GET :page-id?fields=id");
+    s.id(
+      graphBody(
+        s,
+        await graphRequest(creds.pageId, {
+          params: { fields: "id" },
+          accessToken: creds.pageToken,
+          appSecret: creds.appSecret,
+        }),
+      ).id,
+      "id",
+    );
     return null;
   } catch (probe) {
     return `the configured token cannot read its own Page ${creds.pageId} (${getErrorMessage(probe)})`;
@@ -803,11 +860,19 @@ async function postFacts(refs: string[]): Promise<Map<string, DirectPostFacts>> 
               return;
             }
           } else {
-            await graphRequest<{ id: string }>(postId, {
-              params: { fields: "id" },
-              accessToken: creds.pageToken,
-              appSecret: creds.appSecret,
-            });
+            // Existence is a 2xx that names an id; any other body is a failed lookup (QUEUE).
+            const s = metaShape("GET :post-id?fields=id");
+            s.id(
+              graphBody(
+                s,
+                await graphRequest(postId, {
+                  params: { fields: "id" },
+                  accessToken: creds.pageToken,
+                  appSecret: creds.appSecret,
+                }),
+              ).id,
+              "id",
+            );
           }
           out.set(ref, { state: "PUBLISHED", released: true, platform: "facebook" });
         } catch (err) {
@@ -848,12 +913,12 @@ async function analyticsPost(rawRef: string): Promise<Record<string, number>> {
     // A Reel has no feed story to ask; its counters live on the video node,
     // under the Reels metric names (FB_REEL_METRICS), passed through unrenamed.
     const creds = await metaCredentials();
-    const data = await graphRequest<{ data?: MetaInsightRow[] }>(`${postId}/video_insights`, {
+    const data = await graphRequest(`${postId}/video_insights`, {
       params: { metric: FB_REEL_METRICS.join(",") },
       accessToken: creds.pageToken,
       appSecret: creds.appSecret,
     });
-    return toMetricBag(data.data ?? []);
+    return toMetricBag(readInsightRows(metaShape("GET :video-id/video_insights"), data));
   }
   // Insights are a property of the STORY. Asking Graph for `post_media_view`
   // on a photo node returns nothing useful, so this must be the parsed id.

@@ -176,7 +176,7 @@ describe("createContainer", () => {
 
   it("throws when the response carries no id", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({}));
-    await expect(createContainer({ mediaType: "TEXT", text: "x" })).rejects.toThrow(/no id/);
+    await expect(createContainer({ mediaType: "TEXT", text: "x" })).rejects.toThrow(/at id: expected a non-empty string, got missing/);
   });
 });
 
@@ -327,7 +327,7 @@ describe("getProfile", () => {
 
   it("throws when id or username is missing from the response", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ id: "999" }));
-    await expect(getProfile()).rejects.toThrow(/missing id\/username/);
+    await expect(getProfile()).rejects.toThrow(/GET \/me: unexpected response shape at username: expected a non-empty string, got missing/);
   });
 });
 

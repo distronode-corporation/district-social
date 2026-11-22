@@ -39,10 +39,25 @@ import {
   getInstagramFollowers,
   getInstagramMediaInsights,
   getInstagramUserInsights,
+  graphBody,
   graphRequest,
   metaCredentials,
+  metaShape,
   MetaGraphError,
 } from "./meta-graph.js";
+
+/**
+ * The id a Graph create answers with (`{ id }`), read through a Shape: a 2xx
+ * with no id, or a non-string one, is a ResponseShapeError, which retry.ts
+ * counts as an unknown outcome, so the create is never re-sent.
+ */
+function createdId(operation: string, parsed: unknown): string {
+  const s = metaShape(operation);
+  return s.id(graphBody(s, parsed).id, "id");
+}
+
+/** Every `status_code` Meta documents for a container; any other value is refused, not polled on. */
+const CONTAINER_STATUS_CODES = ["EXPIRED", "ERROR", "FINISHED", "IN_PROGRESS", "PUBLISHED"] as const;
 import { PublishPreflightError } from "./publish.js";
 import type {
   DirectConnectStatus,
@@ -167,12 +182,16 @@ async function connectStatus(): Promise<DirectConnectStatus> {
       };
     }
     // id/username, verified against the ig-user reference (instagram_basic).
-    const profile = await graphRequest<{ id: string; username: string }>(igUserId, {
-      params: { fields: "id,username" },
-      accessToken: pageToken,
-      appSecret,
-    });
-    return { connected: true, accountId: profile.id, displayName: profile.username };
+    const s = metaShape("GET :ig-user-id?fields=id,username");
+    const profile = graphBody(
+      s,
+      await graphRequest(igUserId, {
+        params: { fields: "id,username" },
+        accessToken: pageToken,
+        appSecret,
+      }),
+    );
+    return { connected: true, accountId: s.id(profile.id, "id"), displayName: s.str(profile.username, "username") };
   } catch (err) {
     // A transport that cannot report status must not throw: publish.ts's
     // directConnectedAccounts() treats the whole platform as unreachable and
@@ -371,11 +390,19 @@ async function waitUntilFinished(
   budget: PollBudget = IMAGE_POLL,
 ): Promise<void> {
   for (let attempt = 0; attempt < budget.maxAttempts; attempt++) {
-    const { status_code: statusCode, status } = await graphRequest<ContainerStatusResponse>(containerId, {
-      params: { fields: "status_code,status" },
-      accessToken,
-      appSecret,
-    });
+    const s = metaShape("GET :container-id?fields=status_code,status");
+    const body = graphBody(
+      s,
+      await graphRequest(containerId, {
+        params: { fields: "status_code,status" },
+        accessToken,
+        appSecret,
+      }),
+    );
+    const rawCode = s.str(body.status_code, "status_code");
+    const statusCode: ContainerStatusResponse["status_code"] =
+      CONTAINER_STATUS_CODES.find((c) => c === rawCode) ?? s.fail("status_code", `one of ${CONTAINER_STATUS_CODES.join(", ")}`, rawCode);
+    const status = s.optStr(body.status, "status");
 
     if (statusCode === "FINISHED" || statusCode === "PUBLISHED") return;
 
@@ -424,7 +451,7 @@ async function createReelContainer(
   render: PlatformRender,
 ): Promise<string> {
   const trial = render.instagramTrialReel;
-  const { id } = await graphRequest<{ id: string }>(`${igUserId}/media`, {
+  const id = createdId("POST :ig-user-id/media", await graphRequest(`${igUserId}/media`, {
     method: "POST",
     params: {
       media_type: "REELS",
@@ -436,7 +463,7 @@ async function createReelContainer(
     },
     accessToken,
     appSecret,
-  });
+  }));
   return id;
 }
 
@@ -447,12 +474,12 @@ async function createSingleContainer(
   image: InstagramImageSource,
   caption: string,
 ): Promise<string> {
-  const { id } = await graphRequest<{ id: string }>(`${igUserId}/media`, {
+  const id = createdId("POST :ig-user-id/media", await graphRequest(`${igUserId}/media`, {
     method: "POST",
     params: { image_url: image.url, caption, alt_text: image.altText },
     accessToken,
     appSecret,
-  });
+  }));
   return id;
 }
 
@@ -479,12 +506,12 @@ async function createCarouselContainer(
 ): Promise<string> {
   const childIds: string[] = [];
   for (const image of images) {
-    const { id } = await graphRequest<{ id: string }>(`${igUserId}/media`, {
+    const id = createdId("POST :ig-user-id/media", await graphRequest(`${igUserId}/media`, {
       method: "POST",
       params: { image_url: image.url, is_carousel_item: true, alt_text: image.altText },
       accessToken,
       appSecret,
-    });
+    }));
     await waitUntilFinished(id, accessToken, appSecret);
     childIds.push(id);
   }
@@ -492,12 +519,12 @@ async function createCarouselContainer(
   // "children (comma-separated list of up to 10 container IDs)" — Meta's own
   // Content Publishing guide's carousel example. Standard Graph API
   // convention for a list-valued param sent through a form body.
-  const { id: parentId } = await graphRequest<{ id: string }>(`${igUserId}/media`, {
+  const parentId = createdId("POST :ig-user-id/media carousel", await graphRequest(`${igUserId}/media`, {
     method: "POST",
     params: { media_type: "CAROUSEL", caption, children: childIds.join(",") },
     accessToken,
     appSecret,
-  });
+  }));
   return parentId;
 }
 
@@ -533,12 +560,9 @@ async function fetchPermalink(
   appSecret: string,
 ): Promise<string | undefined> {
   try {
-    const { permalink } = await graphRequest<{ permalink?: string }>(mediaId, {
-      params: { fields: "permalink" },
-      accessToken,
-      appSecret,
-    });
-    return permalink;
+    const s = metaShape("GET :media-id?fields=permalink");
+    const body = graphBody(s, await graphRequest(mediaId, { params: { fields: "permalink" }, accessToken, appSecret }));
+    return s.optId(body.permalink, "permalink");
   } catch (err) {
     console.warn(
       `[instagram] permalink lookup failed for published post ${mediaId}, falling back to the unverified ` +
@@ -593,12 +617,12 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
     await waitUntilFinished(creationId, accessToken, appSecret);
   }
 
-  const { id: mediaId } = await graphRequest<{ id: string }>(`${igUserId}/media_publish`, {
+  const mediaId = createdId("POST :ig-user-id/media_publish", await graphRequest(`${igUserId}/media_publish`, {
     method: "POST",
     params: { creation_id: creationId },
     accessToken,
     appSecret,
-  });
+  }));
 
   let warnings: string[] | undefined;
   if (render.firstComment) {

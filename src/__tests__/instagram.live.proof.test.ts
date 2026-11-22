@@ -149,12 +149,12 @@ describe.runIf(enabled)("instagram transport live proof", () => {
 
     // Step 1: it exists, read back from Meta, not from the publish response.
     const { pageToken, appSecret } = await creds();
-    const read = await graphRequest<{ id: string }>(posted.ref, {
+    const read = await graphRequest(posted.ref, {
       params: { fields: "id" },
       accessToken: pageToken,
       appSecret,
     });
-    expect(read.id).toBe(posted.ref);
+    expect(read).toMatchObject({ id: posted.ref });
     const factsBefore = await instagramTransport.postFacts([posted.ref]);
     expect(factsBefore.get(posted.ref)).toMatchObject({ state: "PUBLISHED", released: true });
 
@@ -168,7 +168,7 @@ describe.runIf(enabled)("instagram transport live proof", () => {
     // test). The read must fail with Meta's not-found wording: a timeout or a
     // rate limit also throws, and neither is evidence of a deletion.
     await expect(
-      graphRequest<{ id: string }>(posted.ref, { params: { fields: "id" }, accessToken: pageToken, appSecret }),
+      graphRequest(posted.ref, { params: { fields: "id" }, accessToken: pageToken, appSecret }),
     ).rejects.toThrow(/does not exist|cannot be loaded/i);
   });
 

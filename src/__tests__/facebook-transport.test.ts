@@ -600,7 +600,10 @@ describe("facebook transport", () => {
     it("still deletes the photo when the story is already gone", async () => {
       // The retry path after a partial failure, and the case where Meta DOES
       // cascade: "already gone" on the story must not abort the photo cleanup.
-      graphRequestMock.mockRejectedValueOnce(notFound()).mockResolvedValue({ success: true });
+      graphRequestMock
+        .mockRejectedValueOnce(notFound())
+        .mockResolvedValueOnce({ id: "page-1" }) // the token still reads its own Page
+        .mockResolvedValue({ success: true });
 
       await facebookTransport.deletePost("page-1_777:photo:photo-1");
 

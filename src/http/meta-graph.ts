@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { graphTime, type RecentPostsPage } from "../recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { shape, type Shape } from "./shape.js";
 
 /**
  * The shared Meta Graph client behind the P3 trio (Facebook Page, Instagram,
@@ -213,13 +214,38 @@ export interface GraphErrorEnvelope {
 }
 
 /**
+ * The Graph error envelope's fields, each kept only when it has the type the
+ * error class carries. This is the FAILURE path, so nothing here throws a shape
+ * error: a mistyped field is dropped and the HTTP status still reports the
+ * failure, rather than a malformed envelope hiding it behind a different error.
+ */
+export function readGraphError(parsed: unknown): NonNullable<GraphErrorEnvelope["error"]> | undefined {
+  const raw = isPlainObject(parsed) ? parsed.error : undefined;
+  if (raw === undefined || raw === null) return undefined;
+  if (!isPlainObject(raw)) return {};
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  return {
+    message: str(raw.message),
+    type: str(raw.type),
+    code: num(raw.code),
+    error_subcode: num(raw.error_subcode),
+    fbtrace_id: str(raw.fbtrace_id),
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * One Graph request, with the proof attached and the error envelope decoded.
  *
  * Params are sent as a form body for writes and as a query string for reads,
  * which is what Meta's own examples do and, more importantly, keeps long values
  * (captions, image URLs) off the request line where proxies truncate them.
  */
-export async function graphRequest<T>(
+export async function graphRequest(
   path: string,
   options: {
     method?: "GET" | "POST" | "DELETE";
@@ -227,7 +253,7 @@ export async function graphRequest<T>(
     accessToken: string;
     appSecret: string;
   },
-): Promise<T> {
+): Promise<unknown> {
   const { method = "GET", params = {}, accessToken, appSecret } = options;
 
   const fields = new URLSearchParams();
@@ -292,21 +318,32 @@ export async function graphRequest<T>(
     );
   }
 
-  const envelope = parsed as GraphErrorEnvelope;
-  if (!response.ok || envelope.error) {
-    const err = envelope.error ?? {};
+  const graphError = readGraphError(parsed);
+  if (!response.ok || graphError) {
+    const err = graphError ?? {};
     throw new MetaGraphError(
       err.message ?? `Meta request failed with HTTP ${response.status}`,
       response.status,
-      typeof err.code === "number" ? err.code : null,
-      typeof err.error_subcode === "number" ? err.error_subcode : null,
+      err.code ?? null,
+      err.error_subcode ?? null,
       err.type ?? null,
       err.fbtrace_id ?? null,
       retryAfterHeader(response),
     );
   }
 
-  return parsed as T;
+  // The caller reads the body through a Shape (shape.ts); nothing here asserts its type.
+  return parsed;
+}
+
+/** A Graph 2xx body read as an object, for `operation`'s Shape. An empty body parsed as `{}` above. */
+export function graphBody(s: Shape, parsed: unknown): Record<string, unknown> {
+  return s.obj(parsed, "(body)");
+}
+
+/** The readers for one Graph response (Facebook and Instagram share the host and the envelope). */
+export function metaShape(operation: string): Shape {
+  return shape("meta", operation);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -321,13 +358,6 @@ const RUPLOAD_HOST = "https://rupload.facebook.com";
  * Same ceiling and same reasoning as pinterest.ts's body-carrying upload.
  */
 export const RUPLOAD_TIMEOUT_MS = 120_000;
-
-interface RuploadResponse {
-  success?: boolean;
-  message?: string;
-  debug_info?: { retriable?: boolean; type?: string; message?: string };
-  error?: GraphErrorEnvelope["error"];
-}
 
 /**
  * Hand Meta a PUBLIC video URL for an open Page Reels upload session.
@@ -371,9 +401,9 @@ export async function ruploadHostedVideo(
   );
 
   const text = await vendorText(response, responseOpts);
-  let parsed: RuploadResponse;
+  let parsed: unknown;
   try {
-    parsed = text ? (JSON.parse(text) as RuploadResponse) : {};
+    parsed = text ? (JSON.parse(text) as unknown) : {};
   } catch {
     throw new MetaGraphError(
       `Meta's Reels upload returned a non-JSON response (${response.status}): ${text.slice(0, 200)}`,
@@ -385,18 +415,24 @@ export async function ruploadHostedVideo(
     );
   }
 
-  if (response.ok && parsed.success === true) return;
+  // Success is exactly `{ success: true }` on a 2xx. Anything else is a failure,
+  // decoded leniently (each field kept only when it is a string) so a malformed
+  // failure body still reports the failure rather than a different error.
+  const body = isPlainObject(parsed) ? parsed : {};
+  if (response.ok && body.success === true) return;
 
-  const err = parsed.error ?? {};
+  const err = readGraphError(body) ?? {};
+  const debug = isPlainObject(body.debug_info) ? body.debug_info : {};
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
   throw new MetaGraphError(
     err.message ??
-      parsed.debug_info?.message ??
-      parsed.message ??
+      str(debug.message) ??
+      str(body.message) ??
       `Meta's Reels upload for video ${videoId} failed with HTTP ${response.status}`,
     response.status,
-    typeof err.code === "number" ? err.code : null,
-    typeof err.error_subcode === "number" ? err.error_subcode : null,
-    err.type ?? parsed.debug_info?.type ?? null,
+    err.code ?? null,
+    err.error_subcode ?? null,
+    err.type ?? str(debug.type) ?? null,
     err.fbtrace_id ?? null,
     retryAfterHeader(response),
   );
@@ -426,6 +462,26 @@ export interface MetaInsightRow {
 function insightValue(row: MetaInsightRow): number | undefined {
   const raw = row.total_value?.value ?? row.values?.[0]?.value;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+}
+
+/**
+ * An insights body's rows, read through `s`: `data` must be an array (or
+ * absent), each row an object with a string `name`, and `values`/`total_value`
+ * of the right container types. The VALUE itself stays as read, because
+ * toMetricBag's contract is that a breakdown object or a missing counter is
+ * ABSENT from the bag, not a refused call: Meta returns per-type objects for
+ * some metrics by design.
+ */
+export function readInsightRows(s: Shape, parsed: unknown): MetaInsightRow[] {
+  const body = s.obj(parsed, "(body)");
+  return s.optEach(body.data, "data", (item, at) => {
+    const row = s.obj(item, at);
+    return {
+      name: s.str(row.name, `${at}.name`),
+      values: s.optEach(row.values, `${at}.values`, (v, vat) => ({ value: s.obj(v, vat).value })),
+      total_value: s.optObj(row.total_value, `${at}.total_value`),
+    };
+  });
 }
 
 /**
@@ -465,12 +521,12 @@ export async function fetchInsights(
   params: Record<string, string | number | undefined>,
   creds: { pageToken: string; appSecret: string },
 ): Promise<Record<string, number>> {
-  const data = await graphRequest<{ data?: MetaInsightRow[] }>(path, {
+  const data = await graphRequest(path, {
     params,
     accessToken: creds.pageToken,
     appSecret: creds.appSecret,
   });
-  return toMetricBag(data.data ?? []);
+  return toMetricBag(readInsightRows(metaShape(`GET ${path.replace(/^[^/]+/, ":id")}`), data));
 }
 
 /**
@@ -537,13 +593,14 @@ export async function getInstagramFollowers(): Promise<{ followers: number }> {
   if (!creds.igUserId) {
     throw new Error("instagram: no Instagram business account is linked (MetaCredentials.igUserId is unset)");
   }
-  const data = await graphRequest<{ followers_count?: unknown }>(creds.igUserId, {
+  const data = await graphRequest(creds.igUserId, {
     params: { fields: "followers_count" },
     accessToken: creds.pageToken,
     appSecret: creds.appSecret,
   });
-  const raw = data.followers_count;
-  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+  const s = metaShape("GET :ig-user-id?fields=followers_count");
+  const raw = s.optNum(graphBody(s, data).followers_count, "followers_count");
+  if (raw === undefined) {
     throw new Error(
       "instagram: followers_count missing from the Graph response — the token likely lacks " +
         "instagram_basic/instagram_manage_insights. Refusing to report 0, which would read as a lost audience.",
@@ -609,13 +666,14 @@ export async function getFacebookPageInsights(): Promise<Record<string, number>>
  */
 export async function getFacebookFollowers(): Promise<{ followers: number }> {
   const creds = await metaCredentials();
-  const data = await graphRequest<{ followers_count?: unknown }>(creds.pageId, {
+  const data = await graphRequest(creds.pageId, {
     params: { fields: "followers_count" },
     accessToken: creds.pageToken,
     appSecret: creds.appSecret,
   });
-  const raw = data.followers_count;
-  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+  const s = metaShape("GET :page-id?fields=followers_count");
+  const raw = s.optNum(graphBody(s, data).followers_count, "followers_count");
+  if (raw === undefined) {
     throw new Error(
       "facebook: followers_count missing from the Graph response — the token likely lacks " +
         "pages_read_engagement/read_insights. Refusing to report 0, which would read as a lost audience.",
@@ -631,36 +689,26 @@ export async function getFacebookFollowers(): Promise<{ followers: number }> {
 /** How many of the newest posts one crash-check read asks for. */
 export const RECENT_POSTS_LIMIT = 25;
 
-interface GraphList<T> {
-  data?: T[];
-  paging?: { next?: string };
-}
-
-interface GraphPostRow {
-  id?: string;
-  message?: string;
-  description?: string;
-  caption?: string;
-  created_time?: string;
-  timestamp?: string;
-  permalink_url?: string;
-  permalink?: string;
-}
-
-function recentPage(res: GraphList<GraphPostRow>, idOf: (id: string) => string): RecentPostsPage {
-  const posts = (res.data ?? []).flatMap((r) =>
-    typeof r.id === "string" && r.id
-      ? [
-          {
-            id: idOf(r.id),
-            texts: [r.message, r.description, r.caption].filter((t): t is string => typeof t === "string"),
-            createdAt: graphTime(r.created_time ?? r.timestamp),
-            ...(r.permalink_url || r.permalink ? { url: (r.permalink_url ?? r.permalink)! } : {}),
-          },
-        ]
-      : [],
-  );
-  return { posts, more: Boolean(res.paging?.next) };
+/**
+ * One page of a Graph post list, every field read through `s`: `id` is
+ * required (a post with no id cannot be matched), the text, time and permalink
+ * fields are optional strings, and `paging.next` an optional string.
+ */
+function recentPage(s: Shape, parsed: unknown, idOf: (id: string) => string): RecentPostsPage {
+  const res = graphBody(s, parsed);
+  const posts = s.optEach(res.data, "data", (item, at) => {
+    const r = s.obj(item, at);
+    const text = (key: string) => s.optStr(r[key], `${at}.${key}`);
+    const url = text("permalink_url") ?? text("permalink");
+    return {
+      id: idOf(s.id(r.id, `${at}.id`)),
+      texts: [text("message"), text("description"), text("caption")].filter((t): t is string => t !== undefined),
+      createdAt: graphTime(text("created_time") ?? text("timestamp")),
+      ...(url ? { url } : {}),
+    };
+  });
+  const next = s.optStr(s.optObj(res.paging, "paging")?.next, "paging.next");
+  return { posts, more: Boolean(next) };
 }
 
 /**
@@ -671,7 +719,7 @@ function recentPage(res: GraphList<GraphPostRow>, idOf: (id: string) => string):
  */
 export async function listRecentPagePosts(since: Date): Promise<RecentPostsPage> {
   const creds = await metaCredentials();
-  const res = await graphRequest<GraphList<GraphPostRow>>(`${creds.pageId}/published_posts`, {
+  const res = await graphRequest(`${creds.pageId}/published_posts`, {
     params: {
       fields: "id,message,created_time,permalink_url",
       since: Math.floor(since.getTime() / 1000),
@@ -680,7 +728,7 @@ export async function listRecentPagePosts(since: Date): Promise<RecentPostsPage>
     accessToken: creds.pageToken,
     appSecret: creds.appSecret,
   });
-  return recentPage(res, (id) => id);
+  return recentPage(metaShape("GET :page-id/published_posts"), res, (id) => id);
 }
 
 /**
@@ -689,22 +737,22 @@ export async function listRecentPagePosts(since: Date): Promise<RecentPostsPage>
  */
 export async function listRecentPageReels(): Promise<RecentPostsPage> {
   const creds = await metaCredentials();
-  const res = await graphRequest<GraphList<GraphPostRow>>(`${creds.pageId}/video_reels`, {
+  const res = await graphRequest(`${creds.pageId}/video_reels`, {
     params: { fields: "id,description,created_time,permalink_url", limit: RECENT_POSTS_LIMIT },
     accessToken: creds.pageToken,
     appSecret: creds.appSecret,
   });
-  return recentPage(res, (id) => `reel:${id}`);
+  return recentPage(metaShape("GET :page-id/video_reels"), res, (id) => `reel:${id}`);
 }
 
 /** `GET /{ig-user-id}/media`: the Instagram account's posts and Reels, newest first. */
 export async function listRecentInstagramMedia(): Promise<RecentPostsPage> {
   const creds = await metaCredentials();
   if (!creds.igUserId) throw new Error("instagram: no Instagram account is linked to the Page (igUserId)");
-  const res = await graphRequest<GraphList<GraphPostRow>>(`${creds.igUserId}/media`, {
+  const res = await graphRequest(`${creds.igUserId}/media`, {
     params: { fields: "id,caption,timestamp,permalink", limit: RECENT_POSTS_LIMIT },
     accessToken: creds.pageToken,
     appSecret: creds.appSecret,
   });
-  return recentPage(res, (id) => id);
+  return recentPage(metaShape("GET :ig-user-id/media"), res, (id) => id);
 }
