@@ -144,7 +144,9 @@ const DEAD_REFRESH_ERRORS = new Set(["ExpiredToken", "InvalidToken", "InvalidDID
  */
 function isRefusedRefresh(err: unknown, xrpcError: AtprotoApi["XRPCError"]): boolean {
   if (!(err instanceof xrpcError)) return true;
-  return err.status === 401 || DEAD_REFRESH_ERRORS.has(err.error);
+  // XRPC types `status` as its numeric ResponseType enum; read as the number it is,
+  // as wrapError does.
+  return Number(err.status) === 401 || DEAD_REFRESH_ERRORS.has(err.error);
 }
 
 /**
