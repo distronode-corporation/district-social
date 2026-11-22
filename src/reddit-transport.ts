@@ -411,7 +411,7 @@ async function destinationRules(destination: string): Promise<Record<string, unk
     about = await getSubredditAbout(subreddit);
   } catch (err) {
     if (isRedditNotFound(err)) {
-      throw new Error(`reddit: r/${subreddit} does not exist (or this token cannot see it)`);
+      throw new Error(`reddit: r/${subreddit} does not exist (or this token cannot see it)`, { cause: err });
     }
     throw err;
   }

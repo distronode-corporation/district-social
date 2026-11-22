@@ -477,8 +477,16 @@ describe("reddit transport", () => {
     });
 
     it("propagates a genuinely nonexistent subreddit (about lookup 404s) rather than reporting empty rules", async () => {
-      getSubredditAboutMock.mockRejectedValue(new RedditError(404, "not found", "GET", "/r/x/about"));
-      await expect(redditTransport.destinationRules!("doesnotexist")).rejects.toThrow(/does not exist/);
+      const notFound = new RedditError(404, "not found", "GET", "/r/x/about");
+      getSubredditAboutMock.mockRejectedValue(notFound);
+      const err = await redditTransport.destinationRules!("doesnotexist").then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(/does not exist/);
+      // The vendor's 404 rides along as the cause, so the RedditError behind the sentence is not lost.
+      expect((err as Error).cause).toBe(notFound);
     });
 
     /**

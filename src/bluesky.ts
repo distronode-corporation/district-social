@@ -398,7 +398,7 @@ async function getAgent(): Promise<Agent> {
         // publish-due fail the leg for good instead of leaving it pending.
         if (!isRefusedRefresh(err, XRPCError)) {
           const { message } = wrapError(err, "POST", "com.atproto.server.refreshSession");
-          throw new Error(`${message} (no request was sent; the stored session is kept)`);
+          throw new Error(`${message} (no request was sent; the stored session is kept)`, { cause: err });
         }
         // A refused refresh is a session whose access token we cannot trust,
         // so drop it and fall through to login. Checking `session.session` and

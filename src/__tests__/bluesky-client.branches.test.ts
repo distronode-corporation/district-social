@@ -901,6 +901,8 @@ describe("persisting the session", () => {
 
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toContain("com.atproto.server.refreshSession");
+    // The refusal XRPC raised rides along as the cause, the very object resumeSession rejected with.
+    expect((err as Error).cause).toBe(failure);
     expect(save).not.toHaveBeenCalledWith(null);
     expect(h.login).not.toHaveBeenCalled();
   });
