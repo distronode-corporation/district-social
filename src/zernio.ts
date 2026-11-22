@@ -22,7 +22,7 @@
  */
 
 import { retryAfterHeader } from "./retry.js";
-import { BODY_KEY, shape, type JsonObject, type Shape } from "./http/shape.js";
+import { shape, type JsonObject, type Shape } from "./http/shape.js";
 
 const BASE_URL = "https://zernio.com/api/v1";
 
@@ -229,7 +229,8 @@ export async function listAccounts(): Promise<ZernioAccount[]> {
     const account: ZernioAccount = { _id: s.id(a._id, `${at}._id`), platform: s.id(a.platform, `${at}.platform`) };
     const username = s.optStr(a.username, `${at}.username`);
     const displayName = s.optStr(a.displayName, `${at}.displayName`);
-    const profileUrl = s.optStr(a.profileUrl, `${at}.profileUrl`);
+    // An empty URL or id reads as absent (the aggregator treats "" that way already); refusing it could fail a live create.
+    const profileUrl = s.optStr(a.profileUrl, `${at}.profileUrl`) || undefined;
     const isActive = s.optBool(a.isActive, `${at}.isActive`);
     if (username !== undefined) account.username = username;
     if (displayName !== undefined) account.displayName = displayName;
@@ -376,7 +377,7 @@ function unwrapPost(operation: string, parsed: unknown): ZernioPost {
       };
       for (const key of ["accountId", "platformPostId", "platformPostUrl", "error"] as const) {
         const v = s.optStr(leg[key], `${lat}.${key}`);
-        if (v !== undefined) result[key] = v;
+        if (v) result[key] = v;
       }
       return result;
     });
@@ -502,7 +503,7 @@ export async function getAnalytics(): Promise<ZernioAnalyticsReport> {
           const out: NonNullable<ZernioAnalyticsPost["platforms"]>[number] = { platform: s.id(leg.platform, `${lat}.platform`) };
           for (const key of ["status", "platformPostId", "accountId"] as const) {
             const v = s.optStr(leg[key], `${lat}.${key}`);
-            if (v !== undefined) out[key] = v;
+            if (v) out[key] = v;
           }
           const legAnalytics = readCounters(s, leg.analytics, `${lat}.analytics`);
           if (legAnalytics) out.analytics = legAnalytics;
@@ -516,12 +517,21 @@ export async function getAnalytics(): Promise<ZernioAnalyticsReport> {
 }
 
 /** A counters object: every value a finite number (a `null` counter is left out, never read as 0). */
+const COUNTERS = ["impressions", "reach", "likes", "comments", "shares", "saves", "clicks", "views", "follows"] as const;
+
+/**
+ * A counters object. The documented counters are each a finite number or
+ * absent (a `null` is left out, never read as 0). Any other key is an extra
+ * field: kept when it is a finite number (a counter Zernio added), ignored
+ * otherwise (metadata beside the counters), never a reason to refuse.
+ */
 function readCounters(s: Shape, value: unknown, at: string): ZernioAnalytics | undefined {
   const bag = s.optObj(value, at);
   if (!bag) return undefined;
   const out: Record<string, number> = {};
   for (const [key, v] of Object.entries(bag)) {
-    const n = s.optNum(v, `${at}${BODY_KEY}`);
+    const known = COUNTERS.find((c) => c === key);
+    const n = known ? s.optNum(v, `${at}.${known}`) : typeof v === "number" && Number.isFinite(v) ? v : undefined;
     if (n !== undefined) out[key] = n;
   }
   return out;

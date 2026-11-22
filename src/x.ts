@@ -29,7 +29,7 @@
 import type { RecentPostsPage } from "./recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
-import { shape, type Shape } from "./http/shape.js";
+import { BODY_KEY, shape, type Shape } from "./http/shape.js";
 
 const BASE_URL = "https://api.x.com/2";
 
@@ -371,6 +371,15 @@ interface XMediaUploadResponse {
 }
 
 /** A media upload or STATUS answer: the fields uploadMedia and ensureProcessed read. */
+/** X's documented processing states. Any other is refused: it would read as "finished" and attach an unready id. */
+const PROCESSING_STATES = ["pending", "in_progress", "succeeded", "failed"] as const;
+
+function processingState(s: Shape, value: unknown): string | undefined {
+  const state = s.optStr(value, "data.processing_info.state");
+  if (state === undefined) return undefined;
+  return PROCESSING_STATES.find((v) => v === state) ?? s.fail("data.processing_info.state", `one of ${PROCESSING_STATES.join(", ")}`, state);
+}
+
 function readMediaUploadResponse(value: unknown, operation: string): XMediaUploadResponse {
   if (value === undefined) return {};
   const s = shape("x", operation);
@@ -382,7 +391,7 @@ function readMediaUploadResponse(value: unknown, operation: string): XMediaUploa
     data: {
       id: s.optId(data.id, "data.id"),
       processing_info: info && {
-        state: s.optStr(info.state, "data.processing_info.state"),
+        state: processingState(s, info.state),
         check_after_secs: s.optNum(info.check_after_secs, "data.processing_info.check_after_secs"),
         error: error && { message: s.optStr(error.message, "data.processing_info.error.message") },
       },
@@ -585,8 +594,9 @@ export async function getMe(): Promise<XProfile> {
 function finiteOnly(bag: Record<string, unknown> | undefined): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(bag ?? {})) {
-    // Absent, never 0 — but a vendor-reported zero is kept.
-    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+    // publicMetrics has refused anything but a finite number or null: a null
+    // stays absent, never 0, and a vendor-reported zero is kept.
+    if (typeof value === "number") out[key] = value;
   }
   return out;
 }
@@ -594,7 +604,12 @@ function finiteOnly(bag: Record<string, unknown> | undefined): Record<string, nu
 /** `data.public_metrics` of a lookup: an object or absent. Its values are filtered by finiteOnly. */
 function publicMetrics(value: unknown, operation: string): Record<string, unknown> | undefined {
   const s = shape("x", operation);
-  return s.optObj(s.optObj(s.obj(value, "(body)").data, "data")?.public_metrics, "data.public_metrics");
+  const bag = s.optObj(s.optObj(s.obj(value, "(body)").data, "data")?.public_metrics, "data.public_metrics");
+  // Every public metric is a scalar count: a present value that is not a
+  // finite number is refused (a null is absent), so "reported but invalid"
+  // never reads like "not reported".
+  for (const v of Object.values(bag ?? {})) s.optNum(v, `data.public_metrics${BODY_KEY}`);
+  return bag;
 }
 
 export async function getTweetMetrics(id: string): Promise<Record<string, number>> {

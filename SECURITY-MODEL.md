@@ -107,11 +107,14 @@ Every network client reads a successful (2xx) response through the readers in
   that drives a decision is also held to the values the vendor documents (a container or
   publish status, a privacy setting, a subreddit's submission type), and a delete answering
   `success: false` or `deleted: false` is refused rather than reported as a delete.
-- **Counters.** A counter is never defaulted to 0. Zernio, YouTube, TikTok and Reddit refuse
-  a counter that is not a number. The metric bags from X, LinkedIn, Pinterest and the Meta
-  insights family (Facebook, Instagram, Threads) keep a counter only when it is a finite
-  number and leave anything else out, because those endpoints return non-scalar breakdowns
-  alongside the scalars by design; the bag's container types are still checked.
+- **Counters.** A counter is never defaulted to 0, and a `null` one is left out. X, Reddit,
+  TikTok, YouTube and Zernio refuse a counter that is not a finite number. The Meta insights
+  family (Facebook, Instagram, Threads) refuses a value that is neither a number nor a
+  breakdown object, and leaves a breakdown out of the bag. Zernio ignores a non-counter field
+  beside its documented counters. The LinkedIn and Pinterest metric bags keep a value only
+  when it is a finite number and leave anything else out, because those endpoints return
+  non-scalar fields alongside the scalars by design; their container types are still
+  checked.
 - **What is not checked.** Fields a client does not read are ignored, so a vendor adding a
   field never breaks a publish. Lengths are not capped field by field; the time and byte
   bounds on reads apply to the whole response. The websocket announcement for a Reddit

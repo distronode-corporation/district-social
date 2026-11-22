@@ -441,7 +441,7 @@ function extractEnhancedPrompt(s: Shape, raw: JsonObject, at: string): string | 
 function parseGeneratedVideo(s: Shape, raw: unknown, at: string): VeoGeneratedVideo {
   const v = s.obj(raw, at);
   return {
-    uri: s.optStr(v.gcsUri, `${at}.gcsUri`),
+    uri: s.optId(v.gcsUri, `${at}.gcsUri`),
     videoBytes: s.optStr(v.bytesBase64Encoded, `${at}.bytesBase64Encoded`),
     mimeType: s.optStr(v.mimeType, `${at}.mimeType`),
     enhancedPrompt: extractEnhancedPrompt(s, v, at),

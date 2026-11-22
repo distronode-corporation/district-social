@@ -646,7 +646,11 @@ function toReportBag(parsed: unknown): Record<string, number> {
   const row = s.arr(rows[0], "rows[0]");
   const headers = s.optEach(report.columnHeaders, "columnHeaders", (h, at) => {
     const header = s.obj(h, at);
-    return { name: s.optStr(header.name, `${at}.name`), columnType: s.optStr(header.columnType, `${at}.columnType`) };
+    const columnType = s.optStr(header.columnType, `${at}.columnType`);
+    if (columnType !== undefined && columnType !== "DIMENSION" && columnType !== "METRIC") {
+      s.fail(`${at}.columnType`, "one of DIMENSION, METRIC", columnType);
+    }
+    return { name: s.optStr(header.name, `${at}.name`), columnType };
   });
   const out: Record<string, number> = {};
   headers.forEach((header, i) => {

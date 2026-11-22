@@ -122,6 +122,10 @@ function serve(e: Endpoint, body: unknown): void {
 }
 
 async function outcome(e: Endpoint, body: unknown): Promise<{ ok: true } | { ok: false; err: unknown }> {
+  // A fresh resolver clears linkedin.ts's cached organization urn, so every
+  // mutation runs the same calls in the same order (beforeEach runs once per
+  // test, not once per mutation in the loop).
+  linkedin.setLinkedInTokenResolver(async () => "tok");
   serve(e, body);
   try {
     await e.call();
@@ -416,6 +420,120 @@ afterEach(() => {
   setEngineDeployment({});
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+/** A 2xx with a raw body and headers, for the cases `respond` cannot shape. */
+function raw(body: string, headers: Record<string, string> = {}): Response {
+  return new Response(body, { status: 200, headers: { "content-type": "application/json", ...headers } });
+}
+
+describe("review follow-ups (PR #18)", () => {
+  it("linkedin: per-post statistics with `elements: null` are unavailable ({}), never zero counters", async () => {
+    fetchMock.mockResolvedValueOnce(respond(ORG_ACL)).mockResolvedValueOnce(respond({ elements: null }));
+    await expect(linkedin.getPostShareStatistics("urn:li:share:1")).resolves.toEqual({});
+  });
+
+  it("linkedin: a reply whose body is not an object still returns the header's id: the comment exists", async () => {
+    fetchMock
+      .mockResolvedValueOnce(respond(ORG_ACL))
+      .mockResolvedValueOnce(raw("null", { "x-restli-id": "urn:li:comment:(urn:li:activity:1,9)" }));
+    await expect(
+      linkedin.replyToComment({ postUrn: "urn:li:share:1", commentUrn: "urn:li:comment:(urn:li:activity:1,2)", text: "hi" }),
+    ).resolves.toEqual({ commentUrn: "urn:li:comment:(urn:li:activity:1,9)" });
+  });
+
+  it("linkedin: without the header, a reply body that is not an object is still refused", async () => {
+    fetchMock.mockResolvedValueOnce(respond(ORG_ACL)).mockResolvedValueOnce(raw("[1]"));
+    await expect(
+      linkedin.replyToComment({ postUrn: "urn:li:share:1", commentUrn: "urn:li:comment:(urn:li:activity:1,2)", text: "hi" }),
+    ).rejects.toBeInstanceOf(ResponseShapeError);
+  });
+
+  it("pinterest: an empty link or board_id reads as absent, never as an empty URL or id", async () => {
+    fetchMock.mockResolvedValueOnce(respond({ id: "p1", link: "", board_id: "", title: "" }));
+    await expect(pinterest.getPin("p1")).resolves.toEqual({ id: "p1", link: undefined, title: "", boardId: undefined });
+  });
+
+  it("reddit: a rejection is reported as RedditApiError even when the data beside it is malformed", async () => {
+    fetchMock.mockResolvedValueOnce(
+      respond({ json: { errors: [["SUBMIT_VALIDATION_FLAIR_REQUIRED", "Choose flair", "flair_id"]], data: { id: 7 } } }),
+    );
+    const err = await reddit.submitPost({ subreddit: "test", title: "t", kind: "self", text: "b" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(reddit.RedditApiError);
+    expect((err as reddit.RedditApiError).flairRequired).toBe(true);
+  });
+
+  it.each([
+    ["threads media", () => threads.getMediaInsights("t1")],
+    ["meta (Facebook post)", () => meta.getFacebookPostInsights("p_1")],
+  ])("%s insights: a counter that is a string is refused; a breakdown object and a null stay absent", async (_label, call) => {
+    fetchMock.mockResolvedValueOnce(respond({ data: [{ name: "views", values: [{ value: "7" }] }] }));
+    await expect(call()).rejects.toThrow(/at data\[0\]\.values\[0\]\.value: expected a finite number or a breakdown object, got a string/);
+    fetchMock.mockResolvedValueOnce(
+      respond({ data: [{ name: "views", values: [{ value: 7 }] }, { name: "by_type", total_value: { value: { like: 1 } } }, { name: "x", values: [{ value: null }] }] }),
+    );
+    await expect(call()).resolves.toEqual({ views: 7 });
+  });
+
+  it("veo: an empty gcsUri is refused", async () => {
+    fetchMock.mockResolvedValueOnce(respond({ done: true, response: { videos: [{ gcsUri: "" }] } }));
+    await expect(
+      veo.pollVideoOperation("projects/p/locations/us-central1/publishers/google/models/veo/operations/1"),
+    ).rejects.toThrow(/at response\.videos\[0\]\.gcsUri: expected a non-empty string, got an empty string/);
+  });
+
+  it("x: a processing state outside the documented four is refused, not read as finished", async () => {
+    fetchMock
+      .mockResolvedValueOnce(respond({ data: { id: "m1" } }))
+      .mockResolvedValueOnce(raw(""))
+      .mockResolvedValueOnce(respond({ data: { id: "m1", processing_info: { state: "unexpected" } } }));
+    await expect(x.uploadImage(new Uint8Array([1]) as Uint8Array<ArrayBuffer>, "image/png")).rejects.toThrow(
+      /at data\.processing_info\.state: expected one of pending, in_progress, succeeded, failed, got a string/,
+    );
+  });
+
+  it("x: processing_info with no state reads as finished, as before", async () => {
+    fetchMock
+      .mockResolvedValueOnce(respond({ data: { id: "m1" } }))
+      .mockResolvedValueOnce(raw(""))
+      .mockResolvedValueOnce(respond({ data: { id: "m1", processing_info: { check_after_secs: 1 } } }));
+    await expect(x.uploadImage(new Uint8Array([1]) as Uint8Array<ArrayBuffer>, "image/png")).resolves.toBe("m1");
+  });
+
+  it("x: a public metric that is not a number is refused, not dropped; null stays absent and 0 is kept", async () => {
+    fetchMock.mockResolvedValueOnce(respond({ data: { public_metrics: { like_count: "invalid" } } }));
+    await expect(x.getTweetMetrics("1")).rejects.toThrow(/at data\.public_metrics\[\?\]: expected a finite number, got a string/);
+    fetchMock.mockResolvedValueOnce(respond({ data: { public_metrics: { like_count: 0, quote_count: null } } }));
+    await expect(x.getTweetMetrics("1")).resolves.toEqual({ like_count: 0 });
+  });
+
+  it("youtube: a columnType outside DIMENSION and METRIC is refused", async () => {
+    fetchMock.mockResolvedValueOnce(respond({ columnHeaders: [{ name: "shares", columnType: "METRIK" }], rows: [[10]] }));
+    await expect(youtube.getVideoAnalytics("v1", new Date(T0))).rejects.toThrow(
+      /at columnHeaders\[0\]\.columnType: expected one of DIMENSION, METRIC, got a string/,
+    );
+  });
+
+  it("zernio: an empty platformPostId, platformPostUrl or profileUrl reads as absent", async () => {
+    fetchMock.mockResolvedValueOnce(
+      respond({ post: { _id: "zp1", platforms: [{ platform: "reddit", status: "published", platformPostId: "", platformPostUrl: "" }] } }),
+    );
+    await expect(zernio.getPost("zp1")).resolves.toEqual({ _id: "zp1", platforms: [{ platform: "reddit", status: "published" }] });
+    fetchMock.mockResolvedValueOnce(respond({ accounts: [{ _id: "a1", platform: "reddit", profileUrl: "" }] }));
+    await expect(zernio.listAccounts()).resolves.toEqual([{ _id: "a1", platform: "reddit" }]);
+  });
+
+  it("zernio: analytics ignore a non-counter field beside the counters, and still refuse a mistyped counter", async () => {
+    fetchMock.mockResolvedValueOnce(
+      respond({ posts: [{ _id: "zp1", analytics: { likes: 5, metadata: { source: "cached" }, note: "x" } }] }),
+    );
+    await expect(zernio.getAnalytics()).resolves.toEqual({ posts: [{ _id: "zp1", analytics: { likes: 5 } }] });
+    // An extra numeric key is kept as a counter, unless JSON's 1e999 made it Infinity.
+    fetchMock.mockResolvedValueOnce(raw('{"posts":[{"_id":"zp1","analytics":{"likes":1,"newCounter":3,"huge":1e999}}]}'));
+    await expect(zernio.getAnalytics()).resolves.toEqual({ posts: [{ _id: "zp1", analytics: { likes: 1, newCounter: 3 } }] });
+    fetchMock.mockResolvedValueOnce(respond({ posts: [{ _id: "zp1", analytics: { likes: "5" } }] }));
+    await expect(zernio.getAnalytics()).rejects.toThrow(/at posts\[0\]\.analytics\.likes: expected a finite number, got a string/);
+  });
 });
 
 describe("refusals a field mutation does not reach", () => {

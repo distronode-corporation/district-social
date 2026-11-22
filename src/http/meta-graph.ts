@@ -472,14 +472,29 @@ function insightValue(row: MetaInsightRow): number | undefined {
  * ABSENT from the bag, not a refused call: Meta returns per-type objects for
  * some metrics by design.
  */
+/**
+ * One insight value: a finite number (the counter), a breakdown object (left
+ * out of the bag by toMetricBag), or absent. A string, a boolean or an array
+ * is refused, so a malformed counter never reads like a missing one.
+ */
+function insightCell(s: Shape, value: unknown, at: string): unknown {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return s.fail(at, "a finite number or a breakdown object", value);
+}
+
 export function readInsightRows(s: Shape, parsed: unknown): MetaInsightRow[] {
   const body = s.obj(parsed, "(body)");
   return s.optEach(body.data, "data", (item, at) => {
     const row = s.obj(item, at);
     return {
       name: s.str(row.name, `${at}.name`),
-      values: s.optEach(row.values, `${at}.values`, (v, vat) => ({ value: s.obj(v, vat).value })),
-      total_value: s.optObj(row.total_value, `${at}.total_value`),
+      values: s.optEach(row.values, `${at}.values`, (v, vat) => ({ value: insightCell(s, s.obj(v, vat).value, `${vat}.value`) })),
+      total_value: (() => {
+        const total = s.optObj(row.total_value, `${at}.total_value`);
+        return total && { value: insightCell(s, total.value, `${at}.total_value.value`) };
+      })(),
     };
   });
 }

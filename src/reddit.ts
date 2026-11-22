@@ -380,6 +380,9 @@ function readSubmitResponse(value: unknown): { errors: Array<Array<string | unde
   const errors = s.optEach(json?.errors, "json.errors", (entry, at) =>
     s.each(entry, at, (part, partAt) => (part === null ? undefined : s.optStr(part, partAt))),
   );
+  // A rejection is read before the success fields: a malformed `data` beside
+  // a real `json.errors` must not hide the rejection (and its flair signal).
+  if (errors.length) return { errors, raw: value };
   const data = s.optObj(json?.data, "json.data");
   return {
     errors,

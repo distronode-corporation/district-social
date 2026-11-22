@@ -384,22 +384,26 @@ describe("insights parsing", () => {
     await expect(getUserInsights()).resolves.toEqual({ followers_count: 250 });
   });
 
-  it("omits a metric whose value is missing or not a number, rather than calling it 0", async () => {
+  it("omits a metric whose value is missing, rather than calling it 0", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         data: [
           { name: "likes", values: [{ value: 5 }] },
           { name: "views", values: [] },
-          { name: "quotes", values: [{ value: "12" }] }, // a string is not a count
           { name: "replies" },
         ],
       }),
     );
     const bag = await getMediaInsights("m1");
     expect(bag).toEqual({ likes: 5 });
-    for (const absent of ["views", "quotes", "replies"]) {
+    for (const absent of ["views", "replies"]) {
       expect(absent in bag).toBe(false);
     }
+  });
+
+  it("refuses a metric whose value is a string: a malformed count is not a missing one", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: [{ name: "quotes", values: [{ value: "12" }] }] }));
+    await expect(getMediaInsights("m1")).rejects.toThrow(/data\[0\]\.values\[0\]\.value: expected a finite number or a breakdown object/);
   });
 
   it("keeps a vendor-reported zero, which is a real datum", async () => {

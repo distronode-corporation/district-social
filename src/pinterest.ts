@@ -223,9 +223,11 @@ function toPin(value: unknown, operation: string): PinterestPin {
   const r = s.obj(value, "(body)");
   return {
     id: s.id(r.id, "id"),
-    link: s.optStr(r.link, "link"),
+    // Type-checked; an empty link or board id is read as absent, not refused:
+    // Pinterest uses "" for "no link", and getPin sits on the reconcile path.
+    link: s.optStr(r.link, "link") || undefined,
     title: s.optStr(r.title, "title"),
-    boardId: s.optStr(r.board_id, "board_id"),
+    boardId: s.optStr(r.board_id, "board_id") || undefined,
   };
 }
 

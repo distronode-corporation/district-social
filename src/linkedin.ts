@@ -792,7 +792,9 @@ export async function getPostShareStatistics(ref: string): Promise<Record<string
   );
   const s = shape("linkedin", "GET /organizationalEntityShareStatistics");
   const field = filter === "shares" ? "share" : "ugcPost";
-  if (data === undefined || s.obj(data, "(body)").elements === undefined) return {};
+  // `elements: null` is no answer either: unavailable ({}), never zero counters.
+  const rawElements = data === undefined ? undefined : s.obj(data, "(body)").elements;
+  if (rawElements === undefined || rawElements === null) return {};
   const elements = elementsOf(s, data).map(({ e, at }) => ({
     share: s.optStr(e.share, `${at}.share`),
     ugcPost: s.optStr(e.ugcPost, `${at}.ugcPost`),
@@ -1006,8 +1008,14 @@ export async function replyToComment(input: {
     },
   );
   const s = shape("linkedin", "POST /socialActions/:urn/comments");
-  const urn = data === undefined ? null : s.optStr(s.obj(data, "(body)").commentUrn, "commentUrn") || null;
-  return { commentUrn: urn ?? headers.get("x-restli-id") };
+  // The reply already exists once this answers 2xx, so the header's id is read
+  // first: a body that is not an object only fails the call when there is no
+  // header to fall back on (it would otherwise hide a created comment's id).
+  const header = headers.get("x-restli-id");
+  const bodyIsObject = typeof data === "object" && data !== null && !Array.isArray(data);
+  const body = data === undefined || (header !== null && !bodyIsObject) ? undefined : s.obj(data, "(body)");
+  const urn = body ? s.optStr(body.commentUrn, "commentUrn") || null : null;
+  return { commentUrn: urn ?? header };
 }
 
 /**
