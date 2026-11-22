@@ -8,13 +8,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *
  * Why it matters, in the shape a human meets it:
  *
- *   - Every failure above this file arrives as a BlueskyError and nothing
- *     else. `status` is the only machine-readable signal left, and it means
- *     three different things: 0 = we never got into XRPC (bad credentials, a
- *     thrown non-Error), 1 = XRPC could not reach the server (a timeout is
- *     THIS, not 0), and a real HTTP code = the vendor answered. retry.ts
- *     classifies on those, so getting them wrong retries a permanent failure
- *     forever or gives up on a rate limit.
+ *   - Every failure above this file arrives as a BlueskyError, bar the few
+ *     plain Errors thrown before anything is sent. `status` is the only
+ *     machine-readable signal left: 0 = no HTTP answer (a timeout, a dropped
+ *     connection, or a failure before XRPC), and a real HTTP code = the vendor
+ *     answered. retry.ts classifies on those, so getting them wrong sends a
+ *     post twice or gives up on a rate limit.
  *   - A publish that could not open a session must not look like a publish.
  *     The login-failure tests assert the vendor was never called, not merely
  *     that something rejected.
@@ -234,19 +233,21 @@ describe("what a caller can conclude from a BlueskyError", () => {
   });
 
   /**
-   * ⚠️ A TIMEOUT IS STATUS 1, NOT 0. The timebox aborts the fetch, the client
+   * ⛔ A TIMEOUT IS AN UNKNOWN OUTCOME. The timebox aborts the fetch, the client
    * wraps the abort as an XRPCError of status 1 (no answer), and wrapError
-   * passes that number straight through. Code that treats 0 as "the network
-   * layer failed" will silently miss every timeout.
+   * maps that to status 0, the sentinel retry.ts reads as "no HTTP answer".
+   * Kept as 1, a create that timed out read as a definite failure, so the leg
+   * stayed pending and the post went out again on the next tick.
    */
-  it("surfaces a timed-out request as XRPC status 1 (Unknown), not 0", async () => {
+  it("surfaces a timed-out request as status 0, an unknown outcome", async () => {
     // What the client's send() makes of an aborted fetch.
     h.post.mockRejectedValue(new XRPCError(1, "Unknown", "The operation was aborted due to timeout"));
 
     const err = (await createPost({ text: "x" }).catch((e: unknown) => e)) as BlueskyError;
 
-    expect(err.status).toBe(1);
+    expect(err.status).toBe(0);
     expect(err.body).toContain("aborted due to timeout");
+    expect(isUnknownOutcome(err)).toBe(true);
   });
 
   /**
@@ -412,11 +413,11 @@ describe("the response byte cap", () => {
    * ⛔ THE REFUSAL IS THE SAME SHAPE A TIMEOUT IS. The wrapped fetch throws a
    * plain Error (like the timebox's DOMException), the XRPC client's send()
    * wraps it in an XRPCError of status 1, and wrapError turns that into the one
-   * error shape that ever escapes this file: a BlueskyError of status 1
-   * (Unknown), never 0 and never a silent pass-through. Getting the status
-   * wrong makes retry.ts misclassify the failure.
+   * error shape that ever escapes this file: a BlueskyError of status 0 (no
+   * answer), never a silent pass-through. Getting the status wrong makes
+   * retry.ts misclassify the failure.
    */
-  it("reaches a caller as the same BlueskyError a timeout does: status 1, reason kept", async () => {
+  it("reaches a caller as the same BlueskyError a timeout does: status 0, reason kept", async () => {
     const wrapped = await wrappedFetch();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(new Uint8Array([1]), { headers: { "content-length": String(CAP + 1) } }),
@@ -438,7 +439,7 @@ describe("the response byte cap", () => {
       const err = (await createPost({ text: "x" }).catch((e: unknown) => e)) as BlueskyError;
 
       expect(err).toBeInstanceOf(BlueskyError);
-      expect(err.status).toBe(1);
+      expect(err.status).toBe(0);
       expect(err.body).toContain("exceeds the fetch byte cap");
       expect(err.message).toContain("com.atproto.repo.createRecord#app.bsky.feed.post");
     } finally {
@@ -1320,10 +1321,16 @@ describe("a post the lexicon does not allow", () => {
     expect(h.post).not.toHaveBeenCalled();
   });
 
-  it("sends a post at exactly the limits", async () => {
-    h.post.mockResolvedValue({ uri: "at://did:plc:x/app.bsky.feed.post/1", cid: "c" });
-    const images = Array.from({ length: 4 }, () => ({ blob, alt: "" }));
+  it.each([
+    ["300 graphemes and four images", "a".repeat(300), 4],
+    ["exactly 3000 UTF-8 bytes in 120 graphemes", "👨‍👩‍👧‍👦".repeat(120), 0],
+  ])("sends a post at exactly the limits: %s", async (_label, text, count) => {
+    const ref = { uri: "at://did:plc:x/app.bsky.feed.post/1", cid: "c" };
+    h.post.mockResolvedValue(ref);
+    const images = Array.from({ length: count }, () => ({ blob, alt: "" }));
 
-    await expect(createPost({ text: "a".repeat(300), images })).resolves.toBeDefined();
+    await expect(createPost({ text, images })).resolves.toEqual(ref);
+    expect(h.post).toHaveBeenCalledTimes(1);
+    expect(h.post.mock.calls[0]![0]).toMatchObject({ text });
   });
 });

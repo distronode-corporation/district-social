@@ -59,6 +59,10 @@ in the version bump, before the tag.
   longer resolves zod 3, and the `overrides.zod` this repository carried is dropped. The
   dependency review no longer allows the advisory. The 5 MiB cap on Bluesky responses stays
   (#6).
+- A Bluesky create that got no answer (a timeout or a dropped connection) is an unknown
+  outcome, the same as on every other network: it reported a status the retry rules read as
+  a definite failure, so the leg stayed pending and the post could go out a second time on
+  the next run.
 - A Bluesky session still opening when the credentials resolver or the session store is
   replaced is no longer cached or returned, and no longer writes to the store.
 - Linear time on long input: the trailing delimiter trim when a link leaves a long line, the

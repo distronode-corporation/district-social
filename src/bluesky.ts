@@ -26,6 +26,7 @@ import {
   Agent,
   CredentialSession,
   XRPCError,
+  XRPC_NO_RESPONSE,
   type AtpSessionData,
   type BlobRef,
   type Facet,
@@ -83,6 +84,11 @@ export class BlueskyError extends Error {
  * cause's message), so this one branch covers network failures, timeouts and
  * real vendor error responses alike.
  *
+ * ⛔ NO ANSWER BECOMES STATUS 0, the engine-wide sentinel retry.ts reads as an
+ * unknown outcome. Kept as 1, a create that timed out read as a definite
+ * failure, which leaves the leg pending and sends the post again on the next
+ * tick: a double post when the first one landed.
+ *
  * ⛔ A ResponseShapeError passes through unchanged: a 2xx answer the client
  * could not read is an unknown outcome to retry.ts (a create may have landed),
  * and wrapping it would hide that.
@@ -91,7 +97,7 @@ function wrapError(err: unknown, method: string, path: string): BlueskyError | R
   if (err instanceof ResponseShapeError) return err;
   if (err instanceof XRPCError) {
     return new BlueskyError(
-      err.status,
+      err.status === XRPC_NO_RESPONSE ? 0 : err.status,
       `${err.error ?? "Error"}: ${err.message ?? ""}`,
       method,
       path,
@@ -127,7 +133,7 @@ function isRefusedRefresh(err: unknown): boolean {
  * byte-capped on the response. The cap refuses oversize by throwing a plain
  * Error, the same failure shape the timebox's abort arrives as; the XRPC
  * client wraps either in an XRPCError of status 1 (no answer), which
- * wrapError maps to the BlueskyError every caller sees.
+ * wrapError maps to the BlueskyError of status 0 every caller sees.
  */
 function timeboxedFetch(): typeof fetch {
   return async (input, init) => {

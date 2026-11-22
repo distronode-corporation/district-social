@@ -423,17 +423,23 @@ describe("resume and refresh (com.atproto.server.refreshSession)", () => {
     expect(events.map(([e]) => e)).toEqual(["update"]);
   });
 
-  it("does not replace a held session that has the same refresh token", async () => {
+  it("does not replace a held session that has the same refresh token, and still rotates its tokens", async () => {
+    const { email: _e, ...noEmail } = sessionBody({
+      accessJwt: "access-2",
+      refreshJwt: "refresh-2",
+      didDoc: didDoc("https://pds.example.net"),
+    });
     const server = fakeServer({
       "com.atproto.server.createSession": () => json(sessionBody({ refreshJwt: "refresh-old" })),
-      "com.atproto.server.refreshSession": (req) => json(sessionBody({ accessJwt: "access-2", refreshJwt: "refresh-2", note: req.authorization })),
+      "com.atproto.server.refreshSession": () => json(noEmail),
     });
     const { session } = open(server.fetch);
     await session.login({ identifier: "x", password: "y" });
 
-    await session.resumeSession({ ...STORED, did: DID });
+    await session.resumeSession({ ...STORED, email: "candidate@example.com" });
 
-    expect(session.session?.email).toBe("owner@example.com");
+    expect(server.calls("com.atproto.server.getSession")).toHaveLength(0);
+    expect(session.session).toMatchObject({ email: "owner@example.com", accessJwt: "access-2", refreshJwt: "refresh-2" });
   });
 
   it("refuses a resume whose DID differs from the session held for that refresh token", async () => {
@@ -452,13 +458,15 @@ describe("resume and refresh (com.atproto.server.refreshSession)", () => {
     ["ExpiredToken", () => json({ error: "ExpiredToken", message: "Token has expired" }, 400)],
     ["InvalidToken", () => json({ error: "InvalidToken", message: "Token could not be verified" }, 400)],
     ["an answer for another DID", () => json(sessionBody({ did: "did:plc:someoneelse" }))],
+    ["an answer it cannot read", () => json({ accessJwt: "only" })],
+    ["a 2xx that is not JSON", () => new Response("<html>ok</html>")],
   ])("ends the session and fires expired when the refresh is refused: %s", async (_label, route) => {
     const server = fakeServer({ "com.atproto.server.refreshSession": route });
     const { session, events } = open(server.fetch);
 
     const err = await session.resumeSession(STORED).catch((e: unknown) => e);
 
-    expect(err).toBeInstanceOf(XRPCError);
+    expect(err).toBeInstanceOf(Error);
     expect(session.hasSession).toBe(false);
     expect(events).toEqual([["expired", undefined]]);
   });
@@ -467,7 +475,6 @@ describe("resume and refresh (com.atproto.server.refreshSession)", () => {
     ["a 5xx", () => json({ error: "UpstreamFailure", message: "bad gateway" }, 502)],
     ["a rate limit", () => json({ error: "RateLimitExceeded" }, 429)],
     ["no answer", () => Promise.reject(new TypeError("fetch failed"))],
-    ["an answer it cannot read", () => json({ accessJwt: "only" })],
   ])("keeps the session and fires network-error when the refresh fails on %s", async (_label, route) => {
     const server = fakeServer({ "com.atproto.server.refreshSession": route });
     const { session, events } = open(server.fetch);
@@ -697,13 +704,25 @@ describe("an authenticated call", () => {
     expect(server.calls("app.bsky.actor.getProfile")[0]!.authorization).toBe("Bearer access-2");
   });
 
-  it("still sends when the refresh it waited for failed", async () => {
+  it("still sends, after the failed refresh it waited for, with the token it still holds", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const { session, agent } = await loggedIn({ "app.bsky.actor.getProfile": () => json(PROFILE) }, async () => {
-      await gate;
-      return json({ error: "InternalServerError" }, 500);
-    });
+    // Set when the refresh is answered: the read must go out after it.
+    let refreshSettled = false;
+    let settledAtRead: boolean | undefined;
+    const { session, agent, server } = await loggedIn(
+      {
+        "app.bsky.actor.getProfile": () => {
+          settledAtRead = refreshSettled;
+          return json(PROFILE);
+        },
+      },
+      async () => {
+        await gate;
+        refreshSettled = true;
+        return json({ error: "InternalServerError" }, 500);
+      },
+    );
 
     const refreshing = session.refreshSession().catch(() => "failed");
     const reading = agent.getProfile(DID);
@@ -711,6 +730,8 @@ describe("an authenticated call", () => {
 
     await expect(refreshing).resolves.toBe("failed");
     await expect(reading).resolves.toEqual(PROFILE);
+    expect(settledAtRead).toBe(true);
+    expect(server.calls("app.bsky.actor.getProfile").map((r) => r.authorization)).toEqual(["Bearer access-1"]);
   });
 
   describe("an error answer", () => {

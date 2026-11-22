@@ -76,8 +76,11 @@ export function detectFacets(text: string): Facet[] | undefined {
   while ((match = URL_REGEX.exec(text))) {
     let uri = match[2]!;
     if (!uri.startsWith("http")) {
-      // The regex's second branch, which always captures a domain.
-      if (!isValidDomain(match.groups!.domain!)) continue;
+      // A bare domain (the pattern's second branch) captures `domain`. An
+      // upper-case scheme ("HTTPS://...") matches the first branch, which
+      // captures none, and is skipped, as the library skips it.
+      const domain = match.groups?.domain;
+      if (!domain || !isValidDomain(domain)) continue;
       uri = `https://${uri}`;
     }
     const start = text.indexOf(match[2]!, match.index);
@@ -149,7 +152,13 @@ export async function resolveMentions(
     facets.map(async (facet) => {
       const mention = mentionOf(facet);
       if (!mention) return facet;
-      const did = await resolve(mention.did).catch(() => "");
+      let did: string;
+      try {
+        did = await resolve(mention.did);
+      } catch {
+        // Thrown synchronously or rejected: either way, unresolved.
+        return null;
+      }
       if (!did) return null;
       mention.did = did;
       return facet;

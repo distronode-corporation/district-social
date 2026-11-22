@@ -10,7 +10,8 @@
  *     `network-error`) and when each fires, which bluesky.ts's session store
  *     depends on;
  *   - a refused refresh token (a 401, ExpiredToken, InvalidToken, a DID that
- *     changed) ends the session, and anything else keeps it;
+ *     changed) ends the session, and anything else keeps it, bar a refresh
+ *     answer the client cannot read, which ends it too;
  *   - an expired access token is refreshed once and the request sent once
  *     more, only after the refresh succeeded;
  *   - the account's PDS, read off the DID document a session answer carries,
@@ -286,9 +287,14 @@ export class CredentialSession {
       this.persistSession?.("update", this.session);
     } catch (err) {
       if (this.session === session) {
+        // ⛔ A refresh answer that could not be read ends the session too: the
+        // server may have rotated the tokens already, so the refresh token
+        // held is likely dead, and keeping it would leave a session that can
+        // neither refresh nor be replaced by a login.
         if (
-          err instanceof XRPCError &&
-          (err.status === 401 || ["ExpiredToken", "InvalidToken", "InvalidDID"].includes(err.error))
+          err instanceof ResponseShapeError ||
+          (err instanceof XRPCError &&
+            (err.status === 401 || ["ExpiredToken", "InvalidToken", "InvalidDID"].includes(err.error)))
         ) {
           this.session = undefined;
           this.persistSession?.("expired", undefined);

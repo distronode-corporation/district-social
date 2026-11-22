@@ -846,6 +846,44 @@
           ]
         }
       ]
+    },
+    {
+      "text": "upper-case scheme HTTP://example.com and HTTPS://EXAMPLE.COM/x",
+      "facets": null
+    },
+    {
+      "text": "Visit HTTPS://example.com now, or https://example.com.",
+      "facets": [
+        {
+          "index": {
+            "byteStart": 34,
+            "byteEnd": 53
+          },
+          "features": [
+            {
+              "$type": "app.bsky.richtext.facet#link",
+              "uri": "https://example.com"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "text": "httpbin.org is a bare domain starting with http",
+      "facets": [
+        {
+          "index": {
+            "byteStart": 0,
+            "byteEnd": 11
+          },
+          "features": [
+            {
+              "$type": "app.bsky.richtext.facet#link",
+              "uri": "httpbin.org"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
