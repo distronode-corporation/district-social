@@ -35,6 +35,9 @@ in the version bump, before the tag.
 
 ### Fixed
 
+- zod advisory GHSA-mrhx-c7xc-m3w5 (memory exhaustion while validating a large array). The
+  zod the @atproto packages pull in is lifted to 4.6.6 by an override, and the dependency
+  review no longer allows the advisory. The 5 MiB cap on Bluesky responses stays.
 - A Bluesky session still opening when the credentials resolver or the session store is
   replaced is no longer cached or returned, and no longer writes to the store.
 - Linear time on long input: the trailing delimiter trim when a link leaves a long line, the

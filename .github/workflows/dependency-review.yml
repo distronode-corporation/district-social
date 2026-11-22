@@ -27,10 +27,3 @@ jobs:
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later, LGPL-3.0-only, LGPL-3.0-or-later, SSPL-1.0, BUSL-1.1
-          # GHSA-mrhx-c7xc-m3w5 (zod 3, memory exhaustion from a crafted input) has no in-range
-          # fix. zod is installed only because @atproto/api and its @atproto packages depend on
-          # zod ^3 (3.25.76 in the lockfile); @anthropic-ai/sdk names it only as an optional peer,
-          # and nothing here imports it. It only validates bsky.social responses, which are capped
-          # at 5 MiB before parsing (RESPONSE_CAP_BYTES in src/bluesky.ts). Remove this entry
-          # when @atproto moves to zod 4.
-          allow-ghsas: GHSA-mrhx-c7xc-m3w5
