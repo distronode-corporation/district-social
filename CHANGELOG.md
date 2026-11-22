@@ -44,8 +44,11 @@ in the version bump, before the tag.
   - An expired access token is refreshed and the request sent once more, only after the
     refresh succeeded; a 5xx or a request with no answer is never repeated.
   - Facet detection is a port of the library's (`src/bluesky-richtext.ts`), checked against
-    its own output. A mention whose handle does not resolve is left as plain text instead of
-    a facet with an empty DID.
+    its own output, with three fixes: a mention whose handle does not resolve is left as
+    plain text instead of a facet with an empty DID; a bare domain always links with
+    `https://`, including one that starts with "http" (`httpbin.org`); and a link written
+    with an upper-case scheme (`HTTPS://EXAMPLE.COM/x`) is linked, with its scheme and host
+    lower-cased, instead of left as plain text.
   - A post over 300 graphemes or 3000 UTF-8 bytes, or with more than four images, is refused
     before anything is sent.
   - New runtime dependencies: `zod` 4.6.6 (the schemas) and `tlds` 1.261.0 (the domain list

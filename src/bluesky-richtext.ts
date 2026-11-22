@@ -12,9 +12,18 @@
  * would link. The tests compare this output with fixtures captured from that
  * library's `RichText.detectFacets` before it was removed.
  *
- * One difference, on purpose: a mention whose handle does not resolve is
- * dropped. `@atproto/api` kept it with an empty `did`, a facet the lexicon
- * does not allow; dropped, the `@handle` stays plain text.
+ * Three differences, on purpose (the tests list the fixture cases each one
+ * changes):
+ *
+ *   - a mention whose handle does not resolve is dropped. `@atproto/api` kept
+ *     it with an empty `did`, a facet the lexicon does not allow; dropped, the
+ *     `@handle` stays plain text;
+ *   - a bare domain always gets `https://`. The library added it only when the
+ *     text did not start with "http", so `httpbin.org` linked to a relative
+ *     target;
+ *   - a link with a scheme matches in any case (`HTTPS://`), with its scheme
+ *     and host lower-cased and the rest kept as written. The library's pattern
+ *     matched it but its `startsWith("http")` test did not, so it was skipped.
  *
  * Relative imports only, like the rest of this folder.
  */
@@ -43,6 +52,18 @@ const encoder = new TextEncoder();
 /** The UTF-8 byte offset of UTF-16 index `i` in `text`. */
 function utf8Index(text: string, i: number): number {
   return encoder.encode(text.slice(0, i)).byteLength;
+}
+
+/**
+ * `HTTPS://Me@EXAMPLE.COM/Path` as `https://Me@example.com/Path`: the scheme
+ * and host are case-insensitive, so they are lower-cased; the user part and
+ * everything after the authority keep their case.
+ */
+function lowerSchemeAndHost(uri: string): string {
+  return uri.replace(/^(https?):\/\/([^/?#]*)/i, (_all, scheme: string, authority: string) => {
+    const at = authority.lastIndexOf("@") + 1;
+    return `${scheme.toLowerCase()}://${authority.slice(0, at)}${authority.slice(at).toLowerCase()}`;
+  });
 }
 
 function isValidDomain(str: string): boolean {
@@ -74,13 +95,12 @@ export function detectFacets(text: string): Facet[] | undefined {
 
   // links
   while ((match = URL_REGEX.exec(text))) {
+    // The pattern's first branch is a link with a scheme (group 3, any case);
+    // the second, a bare domain, which always captures `domain`.
+    const withScheme = match[3] !== undefined;
     let uri = match[2]!;
-    if (!uri.startsWith("http")) {
-      // A bare domain (the pattern's second branch) captures `domain`. An
-      // upper-case scheme ("HTTPS://...") matches the first branch, which
-      // captures none, and is skipped, as the library skips it.
-      const domain = match.groups?.domain;
-      if (!domain || !isValidDomain(domain)) continue;
+    if (!withScheme) {
+      if (!isValidDomain(match.groups!.domain!)) continue;
       uri = `https://${uri}`;
     }
     const start = text.indexOf(match[2]!, match.index);
@@ -94,6 +114,7 @@ export function detectFacets(text: string): Facet[] | undefined {
       uri = uri.slice(0, -1);
       index.end--;
     }
+    if (withScheme) uri = lowerSchemeAndHost(uri);
     facets.push({
       index: { byteStart: utf8Index(text, index.start), byteEnd: utf8Index(text, index.end) },
       features: [{ $type: "app.bsky.richtext.facet#link", uri }],
