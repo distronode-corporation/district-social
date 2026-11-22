@@ -105,7 +105,7 @@ describe("vendorLength", () => {
    * That was POSTIZ's rule, not Bluesky's. The aggregator measured
    * `String.length` and rejected the post, and this test was written to match
    * the thing that actually refused us. Postiz is deleted, and Bluesky's own
-   * lexicon — the one @atproto/api validates against, read from the installed
+   * lexicon (the one Bluesky validates records against), read from the installed
    * package on 2026-08-05 — says:
    *
    *     text: { type: 'string', maxLength: 3000, maxGraphemes: 300 }

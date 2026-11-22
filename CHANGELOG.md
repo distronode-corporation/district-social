@@ -32,15 +32,43 @@ in the version bump, before the tag.
 - Media asset fetches go through the SSRF guard (`src/ssrf.ts`): an asset URL must be
   public HTTPS, the connection is pinned to the address that was checked, and a redirect is
   refused rather than followed.
+- Bluesky runs on the engine's own AT Protocol client (`src/bluesky-xrpc.ts`) instead of
+  `@atproto/api`: direct XRPC calls for the session, posts, replies, deletes, image uploads
+  and reads. Stored sessions resume as before, and the exported types keep their shape.
+  - Every Bluesky response is checked field by field against a schema
+    (`src/bluesky-schemas.ts`). An answer that does not fit is a `ResponseShapeError` naming
+    the field, and on a create it counts as an unknown outcome, so the post is never sent
+    twice.
+  - The client follows the account's PDS only over https to a public address, and follows
+    no redirect.
+  - An expired access token is refreshed and the request sent once more, only after the
+    refresh succeeded; a 5xx or a request with no answer is never repeated.
+  - Facet detection is a port of the library's (`src/bluesky-richtext.ts`), checked against
+    its own output, with three fixes: a mention whose handle does not resolve is left as
+    plain text instead of a facet with an empty DID; a bare domain always links with
+    `https://`, including one that starts with "http" (`httpbin.org`); and a link written
+    with an upper-case scheme (`HTTPS://EXAMPLE.COM/x`) is linked, with its scheme and host
+    lower-cased, instead of left as plain text.
+  - A post over 300 graphemes or 3000 UTF-8 bytes, or with more than four images, is refused
+    before the post is sent.
+  - New runtime dependencies: `zod` 4.6.6 (the schemas) and `tlds` 1.261.0 (the domain list
+    facet detection checks against). NOTICE credits the AT Protocol code the client derives
+    from.
 
 ### Fixed
 
-- zod advisory GHSA-mrhx-c7xc-m3w5 (memory exhaustion while validating a large array), in
-  this repository's own installs and CI: an override lifts the zod the @atproto packages pull
-  in to 4.6.6, and the dependency review no longer allows the advisory. npm does not apply a
-  package's overrides to its consumers, so an install of the published package still resolves
-  zod 3 through `@atproto/api`'s `^3.23.8`. For them the 5 MiB cap on Bluesky responses, which
-  stays, is the control, and #6 stays open until `@atproto/api` admits a fixed zod.
+- zod advisory GHSA-mrhx-c7xc-m3w5 (memory exhaustion while validating a large array): with
+  `@atproto/api` gone, the package depends on zod 4.6.6 directly, so an install of it no
+  longer resolves zod 3, and the `overrides.zod` this repository carried is dropped. The
+  dependency review no longer allows the advisory. The 5 MiB cap on Bluesky responses stays
+  (#6).
+- A Bluesky create that got no answer (a timeout or a dropped connection) is an unknown
+  outcome, the same as on every other network: it reported a status the retry rules read as
+  a definite failure, so the leg stayed pending and the post could go out a second time on
+  the next run.
+- A Bluesky login that fails with no answer or a 5xx, before any post is sent, no longer
+  reads as an unknown outcome, so the leg stays pending instead of being marked as possibly
+  live.
 - A Bluesky session still opening when the credentials resolver or the session store is
   replaced is no longer cached or returned, and no longer writes to the store.
 - Linear time on long input: the trailing delimiter trim when a link leaves a long line, the

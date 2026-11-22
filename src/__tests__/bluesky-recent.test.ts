@@ -1,14 +1,14 @@
 /**
  * bluesky.ts listRecentPosts: the account's own post records, newest first,
- * for the agent publish's crash check. @atproto/api is mocked; no network.
+ * for the agent publish's crash check. The XRPC client is mocked; no network.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockListRecords = vi.hoisted(() => vi.fn());
 const agentDid = vi.hoisted(() => ({ value: "did:plc:me" as string | undefined }));
 
-vi.mock("@atproto/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@atproto/api")>();
+vi.mock("../bluesky-xrpc.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../bluesky-xrpc.js")>();
   class MockCredentialSession {
     session?: unknown;
     constructor(public serviceUrl: URL) {}
@@ -24,13 +24,13 @@ vi.mock("@atproto/api", async (importOriginal) => {
     get did() {
       return agentDid.value;
     }
-    com = { atproto: { repo: { listRecords: mockListRecords } } };
+    listRecords = mockListRecords;
     constructor(public sessionManager: MockCredentialSession) {}
   }
   return { ...actual, CredentialSession: MockCredentialSession, Agent: MockAgent };
 });
 
-import { XRPCError } from "@atproto/api";
+import { XRPCError } from "../bluesky-xrpc.js";
 import { BlueskyError, listRecentPosts, setBlueskyCredentialsResolver } from "../bluesky.js";
 
 beforeEach(() => {
@@ -44,7 +44,6 @@ afterEach(() => setBlueskyCredentialsResolver(null));
 describe("listRecentPosts", () => {
   it("reads the account's own post collection, keeping replies textless and the cursor flagged", async () => {
     mockListRecords.mockResolvedValueOnce({
-      data: {
         cursor: "c1",
         records: [
           { uri: "at://did:plc:me/app.bsky.feed.post/3", cid: "c", value: { text: "Root", createdAt: "2026-11-08T05:01:00.000Z" } },
@@ -56,7 +55,6 @@ describe("listRecentPosts", () => {
           { uri: "at://did:plc:me/app.bsky.feed.post/1", cid: "c", value: { text: 7, createdAt: "nonsense" } },
           { uri: "at://did:plc:me/app.bsky.feed.post/0", cid: "c", value: {} },
         ],
-      },
     });
     const page = await listRecentPosts();
     expect(mockListRecords).toHaveBeenCalledWith({ repo: "did:plc:me", collection: "app.bsky.feed.post", limit: 25 });
@@ -72,7 +70,7 @@ describe("listRecentPosts", () => {
   });
 
   it("no cursor is the last page", async () => {
-    mockListRecords.mockResolvedValueOnce({ data: { records: [] } });
+    mockListRecords.mockResolvedValueOnce({ records: [] });
     expect(await listRecentPosts()).toEqual({ posts: [], more: false });
   });
 

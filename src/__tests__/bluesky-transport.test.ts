@@ -109,7 +109,7 @@ describe("bluesky transport", () => {
    * tightest limit of the nine platforms.
    *
    * The value is the `app.bsky.embed.images` lexicon's `maxSize` in the
-   * @atproto/api version this repo runs, and must stay numerically identical to
+   * lexicons as @atproto/api 0.20.x ships them, and must stay numerically identical to
    * SPECS.bluesky.maxImageBytes — QA reads SPECS, the publish path reads this,
    * and the two disagreeing is what produces a draft that passes and cannot
    * publish. ⛔ It is 2,000,000 decimal bytes, NOT 2 * 1024 * 1024.
