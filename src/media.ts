@@ -71,6 +71,12 @@ export function analyzeMedia(filePath: string): MediaAsset {
   return asset;
 }
 
+/** The part of `ffprobe -of json` this module reads: numbers for the size, a string for the duration. */
+interface FfprobeJson {
+  streams?: Array<{ width?: number; height?: number }>;
+  format?: { duration?: string };
+}
+
 /** Uses ffprobe when available; silently skips otherwise. */
 function probeDimensions(abs: string): Partial<MediaAsset> {
   try {
@@ -85,7 +91,7 @@ function probeDimensions(abs: string): Partial<MediaAsset> {
       ],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
-    const parsed = JSON.parse(out);
+    const parsed: FfprobeJson = JSON.parse(out);
     const stream = parsed.streams?.[0] ?? {};
     const duration = parseFloat(parsed.format?.duration ?? "");
     return {

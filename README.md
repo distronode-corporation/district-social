@@ -1,10 +1,40 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/distronode-logo-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset=".github/assets/distronode-logo-light.png">
+  <img alt="Distronode" src=".github/assets/distronode-logo-light.png" width="220">
+</picture>
+
 # district-social
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16830/badge)](https://www.bestpractices.dev/projects/16830)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/distronode-corporation/district-social/badge)](https://scorecard.dev/viewer/?uri=github.com/distronode-corporation/district-social)
 [![npm version](https://img.shields.io/npm/v/district-social)](https://www.npmjs.com/package/district-social)
 [![Latest release](https://img.shields.io/github/v/release/distronode-corporation/district-social?label=release)](https://github.com/distronode-corporation/district-social/releases)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/distronode-corporation/district-social/blob/main/LICENSE)
 [![CI](https://github.com/distronode-corporation/district-social/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/distronode-corporation/district-social/actions/workflows/ci.yml?query=branch%3Amain)
+
+**One post in, a checked render for each of ten social networks out, built to publish only
+what a person approved, with that approval enforced by your application.**
+
+<img alt="A terminal: a six-line script imports district-social and prints, for one post with an emoji and a link, its length as each of the ten networks counts it against that network's limit: 47 of 280 on X, 57 of 300 on Bluesky, 58 on most others, 60 on YouTube" src=".github/assets/measure.png" width="720">
+
+*Real output of the script shown, run against district-social 0.1.0 from npm. X counts a link as 23 characters, whatever its length.*
+
+```sh
+npm install district-social
+```
+
+```js
+import { vendorLength } from "district-social";
+console.log(vendorLength("twitter", "Dark mode: https://example.com/blog")); // 34
+```
+
+Made by [Distronode](https://distronode.com) · more open source at
+[github.com/distronode-corporation](https://github.com/distronode-corporation) ·
+[npm](https://www.npmjs.com/package/district-social) · [Changelog](https://github.com/distronode-corporation/district-social/blob/main/CHANGELOG.md) ·
+[Roadmap](https://github.com/distronode-corporation/district-social/blob/main/ROADMAP.md)
+
+## What it is
 
 District Social is an engine and a command-line client for drafting, checking and publishing
 social posts. The engine turns one source post into a render per network, runs QA over the
@@ -136,7 +166,8 @@ and a refusal or truncated reply throws) as `llm`.
 - [CONTRIBUTING.md](https://github.com/distronode-corporation/district-social/blob/main/CONTRIBUTING.md): how to run the local gate, and the rules for changes.
 - [SECURITY.md](https://github.com/distronode-corporation/district-social/blob/main/SECURITY.md): how to report a vulnerability privately.
 - [SUPPORT.md](https://github.com/distronode-corporation/district-social/blob/main/SUPPORT.md): where to ask a question or report a bug.
-- [GOVERNANCE.md](https://github.com/distronode-corporation/.github/blob/main/GOVERNANCE.md): who maintains the project and how a change is accepted.
+- [ROADMAP.md](https://github.com/distronode-corporation/district-social/blob/main/ROADMAP.md): what is planned next, and what is not planned.
+- [GOVERNANCE.md](https://github.com/distronode-corporation/.github/blob/main/GOVERNANCE.md): who maintains the project, how a change is accepted, how a vulnerability report is handled, and how the project continues without any one person.
 - [CHANGELOG.md](https://github.com/distronode-corporation/district-social/blob/main/CHANGELOG.md): what changed, release by release.
 
 Licensed under the [Apache License, Version 2.0](https://github.com/distronode-corporation/district-social/blob/main/LICENSE). Copyright 2026 Distronode

@@ -32,6 +32,21 @@ describe("fetchMediaBytes", () => {
     );
   });
 
+  it("refuses a destination that is not public HTTPS before sending anything", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation(async () => new Response(new Uint8Array([1])));
+
+    for (const url of [
+      "http://cdn.example.com/a.png",
+      "https://169.254.169.254/latest/meta-data/",
+      "https://127.0.0.1/a.png",
+      "https://localhost/a.png",
+    ]) {
+      await expect(fetchMediaBytes("bluesky", url)).rejects.toThrow(/^bluesky: failed to fetch media asset \(SSRF guard: /);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("cuts off a response that STREAMS past the cap with no usable Content-Length", async () => {
     // The real body is 16 bytes with no content-length header at all (a
     // constructed Response carries none), so only the streaming half of the

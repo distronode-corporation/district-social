@@ -31,12 +31,9 @@ export default tseslint.config(
       // Off for now: rules the code was not written against. Each is on the tracking list to
       // turn back on once its findings are fixed.
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-enum-comparison": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/require-await": "off",
-      "preserve-caught-error": "off",
       // A deprecated API fails the build, so a deprecation is dealt with when it lands.
       "@typescript-eslint/no-deprecated": "error",
     },

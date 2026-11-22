@@ -19,7 +19,7 @@ untrusted input without the checks this file says are the application's.
 
 | actor | what they can do | what the library does about it |
 | --- | --- | --- |
-| A social network or aggregator API, or anyone in its path | Return a hostile, oversized, slow or malformed response; point an upload at an address of its choosing | TLS with certificate verification; time and byte bounds on reads; the upload destination Reddit names is checked and pinned (`src/ssrf.ts`); a response that is not the JSON expected is an error |
+| A social network or aggregator API, or anyone in its path | Return a hostile, oversized, slow or malformed response; point an upload at an address of its choosing | TLS with certificate verification; time and byte bounds on reads; the upload destination Reddit names, and every media asset URL fetched, is checked and pinned (`src/ssrf.ts`); a response that is not the JSON expected is an error |
 | The model | Answer off-schema, refuse, stop early, or write copy that breaks a network's rules or the brand's | Structured output with a requested schema; a refusal or a truncated reply throws (`src/claude.ts`); every render passes deterministic QA in code, not only the model's own review (`src/qa.ts`) |
 | A person with access to the application, but not approval rights | Try to publish something nobody approved, or something other than what was approved | Nothing in the library grants an approval; the `ApprovalGate` port is single-use and bound to a hash of the exact renders (`src/ports.ts`). Enforcing it is the application's job (below) |
 | Whoever controls a draft's content or settings in the application | Set media, links and text that the library will fetch or send | Length, media and link rules per network in code; the guards below. Which users may set what is the application's job |
@@ -73,7 +73,7 @@ Mapped to the CWE Top 25 and the OWASP Top 10 where they apply to a library like
 
 | weakness | how it is countered | where it is tested |
 | --- | --- | --- |
-| Server-side request forgery (CWE-918, OWASP A10) | `src/ssrf.ts`: HTTPS only, no localhost, metadata or private and reserved ranges on the literal host and every resolved address, pinned dispatcher, no redirects. Where the library applies it is in SECURITY.md's threat model | `src/__tests__/ssrf.test.ts`, `src/__tests__/reddit-upload-pinned.test.ts` |
+| Server-side request forgery (CWE-918, OWASP A10) | `src/ssrf.ts`: HTTPS only, no localhost, metadata or private and reserved ranges on the literal host and every resolved address, pinned dispatcher, no redirects. Where the library applies it is in SECURITY.md's threat model | `src/__tests__/ssrf.test.ts`, `src/__tests__/reddit-upload-pinned.test.ts`, `src/__tests__/media-fetch-pinned.test.ts` |
 | Uncontrolled resource consumption (CWE-400, CWE-770) | Byte caps that refuse (`src/read-capped.ts`), time bounds on vendor calls (`src/http/vendor-fetch.ts`) and media fetches (`src/media-fetch.ts`) | `src/__tests__/read-capped.test.ts`, `src/__tests__/media-fetch.test.ts` |
 | Improper certificate validation (CWE-295) | Node's TLS with certificate verification at its defaults; no code disables it (no `rejectUnauthorized: false`, no `NODE_TLS_REJECT_UNAUTHORIZED`) | Source: none of either appears in the tree |
 | Hard-coded or leaked credentials (CWE-798, CWE-532) | No credential in the repository; tokens come from resolvers at call time; gitleaks scans the whole history on every push to main, every pull request and weekly (`.github/workflows/gitleaks.yml`); the Bluesky login identifier is stored only as a SHA-256 | `src/__tests__/bluesky.test.ts` |
@@ -89,5 +89,6 @@ What the library leaves to the application, and does not counter itself:
 - **Input from the application's own users.** Response bodies from network APIs are parsed
   as JSON and read as typed values, not validated against a schema field by field, and a
   media asset's local `path` is read as given. An application that lets untrusted users set
-  drafts, media paths or media URLs validates them before they reach the engine (see
+  drafts, media paths or media URLs validates them before they reach the engine; media
+  URLs are also held to the SSRF guard when fetched (see
   SECURITY.md's threat model).
