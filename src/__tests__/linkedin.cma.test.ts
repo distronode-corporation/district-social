@@ -532,6 +532,12 @@ describe("time-bound statistics", () => {
     await expect(getFollowerGains(linkedInStatsWindow(NOW, 7))).rejects.toThrow(/refusing to report 0/);
   });
 
+  it("⛔ reads `elements: null` as no elements array too, for both windowed reads", async () => {
+    fetchMock().mockImplementation(async () => response(200, { elements: null }));
+    await expect(getFollowerGains(linkedInStatsWindow(NOW, 7))).rejects.toThrow(/refusing to report 0 new followers/);
+    await expect(getShareStatisticsWindow(linkedInStatsWindow(NOW, 7))).rejects.toThrow(/refusing to report 0 activity/);
+  });
+
   it("sums only the share counters that add across days, and only those reported", async () => {
     fetchMock().mockResolvedValue(
       response(200, {

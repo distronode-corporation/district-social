@@ -195,12 +195,6 @@ function zernioBody(operation: string, parsed: unknown): { s: Shape; body: JsonO
   return { s, body: s.obj(parsed, "(body)") };
 }
 
-/** One of `values`, or a shape error naming them. */
-function oneOf<T extends string>(s: Shape, value: unknown, at: string, values: readonly T[]): T | undefined {
-  const raw = s.optStr(value, at);
-  if (raw === undefined) return undefined;
-  return values.find((v) => v === raw) ?? s.fail(at, `one of ${values.join(", ")}`, raw);
-}
 
 /* -------------------------------------------------------------------------- */
 /*  Accounts                                                                   */
@@ -313,7 +307,13 @@ export interface ZernioPlatformTarget {
 export interface ZernioPlatformResult {
   platform: string;
   accountId?: string;
-  status: "pending" | "published" | "failed";
+  /**
+   * The aggregator acts on `published` and `failed` only; every other state
+   * Zernio reports (pending, processing, uploading, cancelled, ...) reads as
+   * not finished. Type-checked, not held to a list: a state Zernio adds must
+   * not fail a create whose post may already be live.
+   */
+  status: string;
   platformPostId?: string;
   platformPostUrl?: string;
   error?: string;
@@ -325,12 +325,10 @@ export interface ZernioPost {
    * into its NO_POST_ID failure, whose message names the manual recovery.
    */
   _id?: string;
-  status?: "draft" | "scheduled" | "published" | "failed" | "cancelled";
+  /** Type-checked, not held to a list (partial, publishing, ... exist): see ZernioPlatformResult.status. */
+  status?: string;
   platforms?: ZernioPlatformResult[];
 }
-
-const POST_STATUSES = ["draft", "scheduled", "published", "failed", "cancelled"] as const;
-const LEG_STATUSES = ["pending", "published", "failed"] as const;
 
 /**
  * Create and publish immediately.
@@ -363,7 +361,7 @@ function unwrapPost(operation: string, parsed: unknown): ZernioPost {
   const p = at === "post" ? s.obj(body.post, "post") : body;
   const post: ZernioPost = {};
   const id = s.optId(p._id, `${at}._id`);
-  const status = oneOf(s, p.status, `${at}.status`, POST_STATUSES);
+  const status = s.optStr(p.status, `${at}.status`);
   if (id !== undefined) post._id = id;
   if (status !== undefined) post.status = status;
   const platforms = s.optArr(p.platforms, `${at}.platforms`);
@@ -374,7 +372,7 @@ function unwrapPost(operation: string, parsed: unknown): ZernioPost {
       const result: ZernioPlatformResult = {
         platform: s.id(leg.platform, `${lat}.platform`),
         // A leg with no status is still pending: nothing has reported an outcome.
-        status: oneOf(s, leg.status, `${lat}.status`, LEG_STATUSES) ?? "pending",
+        status: s.optStr(leg.status, `${lat}.status`) ?? "pending",
       };
       for (const key of ["accountId", "platformPostId", "platformPostUrl", "error"] as const) {
         const v = s.optStr(leg[key], `${lat}.${key}`);

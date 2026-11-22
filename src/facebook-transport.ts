@@ -598,7 +598,10 @@ async function publishNow(input: DirectPublishInput): Promise<DirectPublishResul
     });
     const photoFields = graphBody(photoShape, photoBody);
     const photo = {
-      id: photoShape.optId(photoFields.id, "id"),
+      // The photo is already live here: an unusable photo id (empty, or not a
+      // string) is treated like a missing one below (warn, keep the post ref),
+      // never thrown, which would discard the post_id we do have.
+      id: typeof photoFields.id === "string" && photoFields.id !== "" ? photoFields.id : undefined,
       post_id: photoShape.optId(photoFields.post_id, "post_id"),
     };
     if (!photo.post_id) {

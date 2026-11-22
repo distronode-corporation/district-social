@@ -419,6 +419,20 @@ afterEach(() => {
 });
 
 describe("refusals a field mutation does not reach", () => {
+  it("zernio: a post or leg state outside the common few (partial, processing, cancelled) is read, not refused", async () => {
+    fetchMock.mockResolvedValue(
+      respond({ post: { _id: "zp1", status: "partial", platforms: [{ platform: "reddit", status: "processing" }, { platform: "x", status: "cancelled" }] } }),
+    );
+    await expect(zernio.getPost("zp1")).resolves.toEqual({
+      _id: "zp1",
+      status: "partial",
+      platforms: [
+        { platform: "reddit", status: "processing" },
+        { platform: "x", status: "cancelled" },
+      ],
+    });
+  });
+
   it("x: a delete answering deleted: false is refused, and an empty answer is a delete", async () => {
     fetchMock.mockResolvedValueOnce(respond({ data: { deleted: false } })).mockResolvedValueOnce(respond(""));
     await expect(x.deleteTweet("1")).rejects.toThrow(/DELETE \/tweets\/:id: unexpected response shape at data\.deleted: expected true, got a boolean/);

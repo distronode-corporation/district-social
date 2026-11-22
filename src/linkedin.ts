@@ -1099,7 +1099,8 @@ export async function getFollowerGains(window: LinkedInStatsWindow): Promise<Rec
       `&${timeIntervalsParam(window)}`,
   );
   const s = shape("linkedin", "GET /organizationalEntityFollowerStatistics");
-  const hasElements = data !== undefined && s.obj(data, "(body)").elements !== undefined;
+  // `null` is no array either: it must not read as a window with no activity.
+  const hasElements = data !== undefined && Array.isArray(s.obj(data, "(body)").elements);
   const gains = elementsOf(s, data).map(({ e, at }) => s.optObj(e.followerGains, `${at}.followerGains`));
   if (!hasElements) {
     throw new LinkedInError(
@@ -1152,7 +1153,8 @@ export async function getShareStatisticsWindow(window: LinkedInStatsWindow): Pro
       `&${timeIntervalsParam(window)}`,
   );
   const s = shape("linkedin", "GET /organizationalEntityShareStatistics");
-  const hasElements = data !== undefined && s.obj(data, "(body)").elements !== undefined;
+  // `null` is no array either: it must not read as a window with no activity.
+  const hasElements = data !== undefined && Array.isArray(s.obj(data, "(body)").elements);
   const elements = elementsOf(s, data).map(({ e, at }) => ({ totalShareStatistics: shareStats(s, e, at) }));
   if (!hasElements) {
     throw new LinkedInError(

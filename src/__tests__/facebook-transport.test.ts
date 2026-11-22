@@ -204,6 +204,15 @@ describe("facebook transport", () => {
       expect(result.ref).toBe("page-1_777");
     });
 
+    it.each([["an empty string", ""], ["a number", 777]])(
+      "treats a photo id that is %s like a missing one, keeping the post ref",
+      async (_label, id) => {
+        graphRequestMock.mockResolvedValue({ id, post_id: "page-1_777" });
+        const result = await facebookTransport.publishNow(input({ media: [image()] }));
+        expect(result.ref).toBe("page-1_777");
+      },
+    );
+
     it("throws a clear, named error rather than posting one of multiple attached images", async () => {
       const images = [image({ url: "https://cdn/1.png" }), image({ url: "https://cdn/2.png" })];
       await expect(facebookTransport.publishNow(input({ media: images }))).rejects.toThrow(
