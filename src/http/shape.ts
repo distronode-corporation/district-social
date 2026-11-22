@@ -57,6 +57,14 @@ export function kindOf(value: unknown): string {
   return typeof value === "object" ? "an object" : `a ${typeof value}`;
 }
 
+/**
+ * The path segment for a member of an object whose KEYS come from the
+ * response (a bag of counters, a map keyed by id). A key is vendor data like
+ * any value, so it never reaches the message: `analytics[?]`, not
+ * `analytics.<whatever the vendor sent>`.
+ */
+export const BODY_KEY = "[?]";
+
 /** A plain JSON object, as `JSON.parse` builds one. */
 export type JsonObject = Record<string, unknown>;
 
@@ -106,7 +114,8 @@ export function shape(vendor: string, operation: string): Shape {
     },
     obj: (v, p) => (isObject(v) ? v : s.fail(p, "an object", v)),
     optObj: (v, p) => (absent(v) ? undefined : s.obj(v, p)),
-    arr: (v, p) => (Array.isArray(v) ? v : s.fail(p, "an array", v)),
+    // Array.isArray narrows to any[]; the elements are unknown until read.
+    arr: (v, p) => (Array.isArray(v) ? (v as unknown[]) : s.fail(p, "an array", v)),
     optArr: (v, p) => (absent(v) ? undefined : s.arr(v, p)),
     str: (v, p) => (typeof v === "string" ? v : s.fail(p, "a string", v)),
     optStr: (v, p) => (absent(v) ? undefined : s.str(v, p)),

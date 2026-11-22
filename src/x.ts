@@ -251,7 +251,7 @@ export async function createTweet(input: CreateTweetInput): Promise<XTweet> {
   const data = s.optObj(res.data, "data");
   const id = s.optId(data?.id, "data.id");
   if (!id) {
-    throw new XError(0, `tweet created but no id was returned: ${JSON.stringify(res).slice(0, 200)}`, "POST", "/tweets");
+    throw new XError(0, "tweet created but no id was returned", "POST", "/tweets");
   }
   return { id, text: s.optStr(data?.text, "data.text") ?? input.text };
 }
@@ -271,7 +271,13 @@ export async function createTweet(input: CreateTweetInput): Promise<XTweet> {
  * the documented error schema, not a confirmed worked example.
  */
 export async function deleteTweet(id: string): Promise<void> {
-  await request("DELETE", `/tweets/${encodeURIComponent(id)}`);
+  // `{ data: { deleted: true } }`, or no body. A `deleted: false` is refused:
+  // the caller would otherwise report a post as deleted that X says is not.
+  const res = await request("DELETE", `/tweets/${encodeURIComponent(id)}`);
+  if (res === undefined) return;
+  const s = shape("x", "DELETE /tweets/:id");
+  const deleted = s.optBool(s.optObj(s.obj(res, "(body)").data, "data")?.deleted, "data.deleted");
+  if (deleted === false) s.fail("data.deleted", "true", deleted);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -462,7 +468,7 @@ export async function uploadMedia(
   const initRes = readMediaUploadResponse(await mediaUploadRequest(initForm), "POST /media/upload INIT");
   const mediaId = initRes.data?.id;
   if (!mediaId) {
-    throw new XError(0, `media INIT returned no id: ${JSON.stringify(initRes).slice(0, 200)}`, "POST", "/media/upload");
+    throw new XError(0, "media INIT returned no id", "POST", "/media/upload");
   }
 
   // A zero-byte asset would otherwise send NO append at all and then FINALIZE,
@@ -548,7 +554,7 @@ export async function getMe(): Promise<XProfile> {
   const id = s.optId(data?.id, "data.id");
   const username = s.optId(data?.username, "data.username");
   if (!id || !username) {
-    throw new XError(0, `GET /users/me returned no id/username: ${JSON.stringify(res).slice(0, 200)}`, "GET", "/users/me");
+    throw new XError(0, "GET /users/me returned no id/username", "GET", "/users/me");
   }
   return { id, username, name: s.optStr(data?.name, "data.name") };
 }

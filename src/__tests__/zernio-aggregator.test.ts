@@ -1131,7 +1131,7 @@ describe("analyticsPost", () => {
       },
     }));
     await expect(zernioAggregator.analyticsPost!("reddit", "zp_1~a")).rejects.toThrow(
-      /posts\[0\]\.platforms\[0\]\.analytics\.reach: expected a finite number, got a string/,
+      /posts\[0\]\.platforms\[0\]\.analytics\[\?\]: expected a finite number, got a string/,
     );
   });
 

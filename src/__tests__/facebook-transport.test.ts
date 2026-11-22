@@ -528,6 +528,13 @@ describe("facebook transport", () => {
       );
     });
 
+    it("refuses a delete that answers success: false, rather than reporting it deleted", async () => {
+      graphRequestMock.mockResolvedValue({ success: false });
+      await expect(facebookTransport.deletePost("page-1_1")).rejects.toThrow(
+        /meta DELETE :id: unexpected response shape at success: expected true, got a boolean/,
+      );
+    });
+
     /** DELETE answers "does not exist"; every read (the Page probe) succeeds. */
     const goneButPageReadable = async (_id: string, opts?: { method?: string }) => {
       if (opts?.method === "DELETE") throw notFound();

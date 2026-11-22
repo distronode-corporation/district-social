@@ -22,7 +22,7 @@
  */
 
 import { retryAfterHeader } from "./retry.js";
-import { shape, type JsonObject, type Shape } from "./http/shape.js";
+import { BODY_KEY, shape, type JsonObject, type Shape } from "./http/shape.js";
 
 const BASE_URL = "https://zernio.com/api/v1";
 
@@ -523,7 +523,7 @@ function readCounters(s: Shape, value: unknown, at: string): ZernioAnalytics | u
   if (!bag) return undefined;
   const out: Record<string, number> = {};
   for (const [key, v] of Object.entries(bag)) {
-    const n = s.optNum(v, `${at}.${key}`);
+    const n = s.optNum(v, `${at}${BODY_KEY}`);
     if (n !== undefined) out[key] = n;
   }
   return out;

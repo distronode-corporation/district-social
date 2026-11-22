@@ -22,7 +22,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
-import { shape, type JsonObject, type Shape } from "./http/shape.js";
+import { BODY_KEY, shape, type JsonObject, type Shape } from "./http/shape.js";
 
 /**
  * `LinkedIn-Version` header value, `YYYYMM`. VERIFIED against the Posts,
@@ -556,7 +556,7 @@ export async function getPostsBatch(refs: string[]): Promise<LinkedInBatchGetRes
   if (results) result.results = results;
   if (statuses) {
     result.statuses = Object.fromEntries(
-      Object.entries(statuses).map(([key, value]) => [key, s.num(value, `statuses[${JSON.stringify(key)}]`)]),
+      Object.entries(statuses).map(([key, value]) => [key, s.num(value, `statuses${BODY_KEY}`)]),
     );
   }
   if (errors) result.errors = errors;
@@ -585,7 +585,7 @@ export async function initializeImageUpload(): Promise<LinkedInImageUpload> {
   if (!uploadUrl || !image) {
     throw new LinkedInError(
       0,
-      `initializeUpload response missing uploadUrl/image: ${JSON.stringify(data).slice(0, 200)}`,
+      "initializeUpload response missing uploadUrl/image",
       "POST",
       "/images?action=initializeUpload",
     );

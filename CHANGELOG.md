@@ -14,6 +14,12 @@ in the version bump, before the tag.
 
 ### Added
 
+- Network responses are validated field by field. Every client except Bluesky (X, Reddit,
+  Pinterest, LinkedIn, Threads, Facebook, Instagram, TikTok, YouTube, Zernio and Vertex AI)
+  reads each field it uses through `src/http/shape.ts` and refuses a missing or mistyped one
+  with `ResponseShapeError`, which never echoes the value and which the retry rule counts as
+  an unknown outcome, so a create is never re-sent. Bluesky follows in a separate change.
+
 - Release assets. A tag's release workflow now attaches the npm tarball, `SHA256SUMS` and the
   provenance npm recorded for it (`.sigstore.json` and `.intoto.jsonl`) to the GitHub
   release, and SECURITY.md says how to verify them.

@@ -367,7 +367,8 @@ function awaitMediaPost(websocketUrl: string): Promise<RedditPost> {
       }
       const redirect = typeof update?.payload?.redirect === "string" ? update.payload.redirect : "";
       const id = /\/comments\/([a-z0-9]+)/i.exec(redirect)?.[1];
-      finish(id ? { id, name: `t3_${id}` } : unknownOutcome(`the announcement named no post: ${String(event.data).slice(0, 120)}`));
+      // The announcement is a vendor body: it is not echoed into the error.
+      finish(id ? { id, name: `t3_${id}` } : unknownOutcome("the announcement named no post"));
     };
   });
 }
@@ -473,7 +474,7 @@ export async function submitPost(input: SubmitPostInput): Promise<RedditPost> {
   if (!data?.id || !data?.name) {
     throw new RedditError(
       200,
-      `submit returned 200 with no errors but no usable post id/name either: ${JSON.stringify(res.raw).slice(0, 300)}`,
+      "submit returned 200 with no errors but no usable post id/name either",
       "POST",
       "/api/submit",
     );
@@ -786,7 +787,7 @@ export async function getMe(): Promise<RedditProfile> {
   const id = s.optStr(res.id, "id");
   const name = s.optStr(res.name, "name");
   if (!id || !name) {
-    throw new RedditError(0, `GET /api/v1/me returned no id/name: ${JSON.stringify(res).slice(0, 200)}`, "GET", "/api/v1/me");
+    throw new RedditError(0, "GET /api/v1/me returned no id/name", "GET", "/api/v1/me");
   }
   const profile: RedditProfile = { id, name };
   const linkKarma = s.optNum(res.link_karma, "link_karma");
@@ -874,7 +875,7 @@ export async function uploadMediaAsset(
   if (!action || !fields.length) {
     throw new RedditError(
       0,
-      `media lease returned no upload action/fields: ${JSON.stringify(lease).slice(0, 200)}`,
+      "media lease returned no upload action/fields",
       "POST",
       "/api/media/asset.json",
     );
