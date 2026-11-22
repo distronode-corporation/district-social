@@ -442,6 +442,15 @@ describe("review follow-ups (PR #18)", () => {
     ).resolves.toEqual({ commentUrn: "urn:li:comment:(urn:li:activity:1,9)" });
   });
 
+  it("linkedin: with the header, a mistyped body commentUrn falls back to the header's id", async () => {
+    fetchMock
+      .mockResolvedValueOnce(respond(ORG_ACL))
+      .mockResolvedValueOnce(raw('{"commentUrn":7}', { "x-restli-id": "urn:li:comment:(urn:li:activity:1,9)" }));
+    await expect(
+      linkedin.replyToComment({ postUrn: "urn:li:share:1", commentUrn: "urn:li:comment:(urn:li:activity:1,2)", text: "hi" }),
+    ).resolves.toEqual({ commentUrn: "urn:li:comment:(urn:li:activity:1,9)" });
+  });
+
   it("linkedin: without the header, a reply body that is not an object is still refused", async () => {
     fetchMock.mockResolvedValueOnce(respond(ORG_ACL)).mockResolvedValueOnce(raw("[1]"));
     await expect(

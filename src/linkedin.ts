@@ -1008,14 +1008,18 @@ export async function replyToComment(input: {
     },
   );
   const s = shape("linkedin", "POST /socialActions/:urn/comments");
-  // The reply already exists once this answers 2xx, so the header's id is read
-  // first: a body that is not an object only fails the call when there is no
-  // header to fall back on (it would otherwise hide a created comment's id).
+  // The reply already exists once this answers 2xx. With the header present,
+  // the body only improves on it (a full urn instead of a bare id), so a body
+  // that is not an object, or a commentUrn that is not a non-empty string,
+  // falls back to the header rather than hiding a created comment's id. With
+  // no header, the body is the only source and is read strictly.
   const header = headers.get("x-restli-id");
-  const bodyIsObject = typeof data === "object" && data !== null && !Array.isArray(data);
-  const body = data === undefined || (header !== null && !bodyIsObject) ? undefined : s.obj(data, "(body)");
-  const urn = body ? s.optStr(body.commentUrn, "commentUrn") || null : null;
-  return { commentUrn: urn ?? header };
+  if (header !== null) {
+    const body = typeof data === "object" && data !== null && !Array.isArray(data) ? (data as JsonObject) : {};
+    return { commentUrn: typeof body.commentUrn === "string" && body.commentUrn ? body.commentUrn : header };
+  }
+  const urn = data === undefined ? null : s.optStr(s.obj(data, "(body)").commentUrn, "commentUrn") || null;
+  return { commentUrn: urn };
 }
 
 /**

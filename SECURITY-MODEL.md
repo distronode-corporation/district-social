@@ -107,7 +107,11 @@ Every network client reads a successful (2xx) response through the readers in
   that drives a decision is also held to the values the vendor documents (a container or
   publish status, a privacy setting, a subreddit's submission type), and a delete answering
   `success: false` or `deleted: false` is refused rather than reported as a delete.
-- **Counters.** A counter is never defaulted to 0, and a `null` one is left out. X, Reddit,
+- **Counters.** A counter is never defaulted to 0 from a missing or malformed field, and a
+  `null` one is left out. The one zero result is deliberate: LinkedIn's per-post statistics,
+  asked for one post by its urn, answer with no element for that post when it has no
+  activity, and that reads as zero counters; `elements` missing or `null` reads as
+  unavailable (`{}`). X, Reddit,
   TikTok, YouTube and Zernio refuse a counter that is not a finite number. The Meta insights
   family (Facebook, Instagram, Threads) refuses a value that is neither a number nor a
   breakdown object, and leaves a breakdown out of the bag. Zernio ignores a non-counter field
