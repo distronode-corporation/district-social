@@ -3,13 +3,20 @@ import {
   toMetricBag,
   NEEDS_REAUTH_CODES,
   RATE_LIMIT_CODES,
+  readGraphError,
+  readInsightRows,
   TRANSIENT_CODES,
-  type GraphErrorEnvelope,
-  type MetaInsightRow,
 } from "./meta-graph.js";
 import { graphTime, type RecentPostsPage } from "./recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { shape, type JsonObject, type Shape } from "./http/shape.js";
+
+/** The readers for one Threads response, and the body read as an object. */
+function threadsBody(operation: string, parsed: unknown): { s: Shape; body: JsonObject } {
+  const s = shape("threads", operation);
+  return { s, body: s.obj(parsed, "(body)") };
+}
 
 /**
  * Threads Graph API vendor client (graph.threads.net).
@@ -205,12 +212,12 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * that keeping them off the request line matters here too, and the vendor's
  * own DELETE docs specifically show `access_token` as a query parameter.
  */
-async function request<T>(
+async function request(
   method: "GET" | "POST" | "DELETE",
   path: string,
   params: Record<string, string | number | boolean | undefined>,
   creds: ThreadsCredentials,
-): Promise<T> {
+): Promise<unknown> {
   const { accessToken, appSecret } = creds;
 
   const fields = new URLSearchParams();
@@ -254,21 +261,22 @@ async function request<T>(
     );
   }
 
-  const envelope = parsed as GraphErrorEnvelope;
-  if (!response.ok || envelope.error) {
-    const err = envelope.error ?? {};
+  const graphError = readGraphError(parsed);
+  if (!response.ok || graphError) {
+    const err = graphError ?? {};
     throw new ThreadsError(
       err.message ?? `Threads request failed with HTTP ${response.status}`,
       response.status,
-      typeof err.code === "number" ? err.code : null,
-      typeof err.error_subcode === "number" ? err.error_subcode : null,
+      err.code ?? null,
+      err.error_subcode ?? null,
       err.type ?? null,
       err.fbtrace_id ?? null,
       retryAfterHeader(response),
     );
   }
 
-  return parsed as T;
+  // Each caller reads the body through a Shape (shape.ts).
+  return parsed;
 }
 
 export type ThreadsMediaType = "TEXT" | "IMAGE" | "VIDEO" | "CAROUSEL";
@@ -348,7 +356,7 @@ export interface ThreadsContainerRef {
 
 export async function createContainer(input: CreateContainerInput): Promise<ThreadsContainerRef> {
   const creds = await threadsCredentials();
-  const data = await request<{ id?: string }>(
+  const parsed = await request(
     "POST",
     `/${creds.userId}/threads`,
     {
@@ -365,10 +373,9 @@ export async function createContainer(input: CreateContainerInput): Promise<Thre
     },
     creds,
   );
-  if (!data.id) {
-    throw new ThreadsError("container creation returned no id", 0, null, null, null, null);
-  }
-  return { id: data.id };
+  // A 2xx with no usable id is a ResponseShapeError: an unknown outcome, never re-sent.
+  const { s, body } = threadsBody("POST /:user-id/threads", parsed);
+  return { id: s.id(body.id, "id") };
 }
 
 export interface ThreadsPublishedRef extends ThreadsContainerRef {
@@ -382,22 +389,20 @@ export interface ThreadsPublishedRef extends ThreadsContainerRef {
 /** `POST /{threads-user-id}/threads_publish`, VERIFIED against /docs/threads/posts. */
 export async function publishContainer(creationId: string): Promise<ThreadsPublishedRef> {
   const creds = await threadsCredentials();
-  const data = await request<{ id?: string; crossreshare_to_ig_status?: "SUCCESS" | "FAILED" }>(
-    "POST",
-    `/${creds.userId}/threads_publish`,
-    { creation_id: creationId },
-    creds,
-  );
-  if (!data.id) {
-    throw new ThreadsError("publish returned no id", 0, null, null, null, null);
-  }
-  return {
-    id: data.id,
-    ...(data.crossreshare_to_ig_status ? { crossShareToIgStatus: data.crossreshare_to_ig_status } : {}),
-  };
+  const parsed = await request("POST", `/${creds.userId}/threads_publish`, { creation_id: creationId }, creds);
+  const { s, body } = threadsBody("POST /:user-id/threads_publish", parsed);
+  const id = s.id(body.id, "id");
+  const raw = s.optStr(body.crossreshare_to_ig_status, "crossreshare_to_ig_status");
+  const cross =
+    raw === undefined || raw === "SUCCESS" || raw === "FAILED"
+      ? raw
+      : s.fail("crossreshare_to_ig_status", '"SUCCESS" or "FAILED"', raw);
+  return { id, ...(cross ? { crossShareToIgStatus: cross } : {}) };
 }
 
 export type ThreadsContainerStatusCode = "IN_PROGRESS" | "FINISHED" | "PUBLISHED" | "ERROR" | "EXPIRED";
+
+const CONTAINER_STATUS_CODES: readonly ThreadsContainerStatusCode[] = ["IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR", "EXPIRED"];
 
 export interface ThreadsContainerStatus {
   status: ThreadsContainerStatusCode;
@@ -413,16 +418,13 @@ export interface ThreadsContainerStatus {
  */
 export async function getContainerStatus(containerId: string): Promise<ThreadsContainerStatus> {
   const creds = await threadsCredentials();
-  const data = await request<{ status?: string; error_message?: string }>(
-    "GET",
-    `/${containerId}`,
-    { fields: "status,error_message" },
-    creds,
-  );
-  return {
-    status: (data.status as ThreadsContainerStatusCode) ?? "IN_PROGRESS",
-    errorMessage: data.error_message,
-  };
+  const parsed = await request("GET", `/${containerId}`, { fields: "status,error_message" }, creds);
+  const { s, body } = threadsBody("GET /:container-id?fields=status,error_message", parsed);
+  // An absent status still reads as IN_PROGRESS (the poll is bounded); a value
+  // outside the documented five is refused rather than polled on as if pending.
+  const raw = s.optStr(body.status, "status") ?? "IN_PROGRESS";
+  const status = CONTAINER_STATUS_CODES.find((c) => c === raw) ?? s.fail("status", `one of ${CONTAINER_STATUS_CODES.join(", ")}`, raw);
+  return { status, errorMessage: s.optStr(body.error_message, "error_message") };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -499,7 +501,9 @@ export async function pollContainerUntilFinished(
  */
 export async function deleteThread(mediaId: string): Promise<void> {
   const creds = await threadsCredentials();
-  await request<{ success?: boolean; deleted_id?: string }>("DELETE", `/${mediaId}`, {}, creds);
+  // `{ success: true }` on a delete; a `false` is refused, because the caller reports success.
+  const { s, body } = threadsBody("DELETE /:media-id", await request("DELETE", `/${mediaId}`, {}, creds));
+  if (s.optBool(body.success, "success") === false) s.fail("success", "true", false);
 }
 
 /**
@@ -513,8 +517,8 @@ export async function deleteThread(mediaId: string): Promise<void> {
  */
 export async function getPermalink(mediaId: string): Promise<string | undefined> {
   const creds = await threadsCredentials();
-  const data = await request<{ permalink?: string }>("GET", `/${mediaId}`, { fields: "permalink" }, creds);
-  return data.permalink;
+  const { s, body } = threadsBody("GET /:media-id?fields=permalink", await request("GET", `/${mediaId}`, { fields: "permalink" }, creds));
+  return s.optId(body.permalink, "permalink");
 }
 
 /**
@@ -549,13 +553,8 @@ const THREADS_MEDIA_METRICS = ["views", "likes", "replies", "reposts", "quotes"]
 
 export async function getMediaInsights(mediaId: string): Promise<Record<string, number>> {
   const creds = await threadsCredentials();
-  const data = await request<{ data?: MetaInsightRow[] }>(
-    "GET",
-    `/${mediaId}/insights`,
-    { metric: THREADS_MEDIA_METRICS.join(",") },
-    creds,
-  );
-  return toMetricBag(data.data ?? []);
+  const data = await request("GET", `/${mediaId}/insights`, { metric: THREADS_MEDIA_METRICS.join(",") }, creds);
+  return toMetricBag(readInsightRows(shape("threads", "GET /:media-id/insights"), data));
 }
 
 /**
@@ -577,13 +576,8 @@ const THREADS_USER_METRICS = [
 
 export async function getUserInsights(): Promise<Record<string, number>> {
   const creds = await threadsCredentials();
-  const data = await request<{ data?: MetaInsightRow[] }>(
-    "GET",
-    `/${creds.userId}/threads_insights`,
-    { metric: THREADS_USER_METRICS.join(",") },
-    creds,
-  );
-  return toMetricBag(data.data ?? []);
+  const data = await request("GET", `/${creds.userId}/threads_insights`, { metric: THREADS_USER_METRICS.join(",") }, creds);
+  return toMetricBag(readInsightRows(shape("threads", "GET /:user-id/threads_insights"), data));
 }
 
 export interface ThreadsProfile {
@@ -600,18 +594,8 @@ export interface ThreadsProfile {
  */
 export async function getProfile(): Promise<ThreadsProfile> {
   const creds = await threadsCredentials();
-  const data = await request<{ id?: string; username?: string }>("GET", "/me", { fields: "id,username" }, creds);
-  if (!data.id || !data.username) {
-    throw new ThreadsError(
-      `profile response missing id/username: ${JSON.stringify(data).slice(0, 200)}`,
-      0,
-      null,
-      null,
-      null,
-      null,
-    );
-  }
-  return { id: data.id, username: data.username };
+  const { s, body } = threadsBody("GET /me", await request("GET", "/me", { fields: "id,username" }, creds));
+  return { id: s.id(body.id, "id"), username: s.id(body.username, "username") };
 }
 
 /** How many of the newest posts one crash-check read asks for. */
@@ -624,26 +608,23 @@ const RECENT_THREADS_LIMIT = 25;
  */
 export async function listRecentThreads(since: Date): Promise<RecentPostsPage> {
   const creds = await threadsCredentials();
-  const res = await request<{
-    data?: Array<{ id?: string; text?: string; timestamp?: string; permalink?: string }>;
-    paging?: { next?: string };
-  }>(
+  const parsed = await request(
     "GET",
     `/${creds.userId}/threads`,
     { fields: "id,text,timestamp,permalink", since: Math.floor(since.getTime() / 1000), limit: RECENT_THREADS_LIMIT },
     creds,
   );
-  const posts = (res.data ?? []).flatMap((r) =>
-    typeof r.id === "string" && r.id
-      ? [
-          {
-            id: r.id,
-            texts: typeof r.text === "string" ? [r.text] : [],
-            createdAt: graphTime(r.timestamp),
-            ...(r.permalink ? { url: r.permalink } : {}),
-          },
-        ]
-      : [],
-  );
-  return { posts, more: Boolean(res.paging?.next) };
+  const { s, body: res } = threadsBody("GET /:user-id/threads", parsed);
+  const posts = s.optEach(res.data, "data", (item, at) => {
+    const r = s.obj(item, at);
+    const text = s.optStr(r.text, `${at}.text`);
+    const permalink = s.optStr(r.permalink, `${at}.permalink`);
+    return {
+      id: s.id(r.id, `${at}.id`),
+      texts: text === undefined ? [] : [text],
+      createdAt: graphTime(s.optStr(r.timestamp, `${at}.timestamp`)),
+      ...(permalink ? { url: permalink } : {}),
+    };
+  });
+  return { posts, more: Boolean(s.optStr(s.optObj(res.paging, "paging")?.next, "paging.next")) };
 }

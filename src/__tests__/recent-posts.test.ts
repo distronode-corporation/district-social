@@ -111,7 +111,6 @@ describe("Meta Graph reads", () => {
         data: [
           { id: "PAGE_1", message: "Hello", created_time: "2026-11-08T05:01:00+0000", permalink_url: "https://fb/p/1" },
           { id: "PAGE_2", created_time: "2026-11-08T05:02:00+0000" },
-          { message: "no id is skipped" },
         ],
         paging: { next: "https://graph/next" },
       }),
@@ -178,7 +177,6 @@ describe("Threads read", () => {
         data: [
           { id: "T1", text: "Root", timestamp: "2026-11-08T05:05:00+0000", permalink: "https://threads/p/1" },
           { id: "T2", timestamp: "2026-11-08T05:06:00+0000" },
-          { text: "no id" },
         ],
         paging: { next: "n" },
       }),
@@ -213,7 +211,6 @@ describe("X read", () => {
           data: [
             { id: "1", text: "Short…", note_tweet: { text: "Short and then the rest" }, created_at: "2026-11-08T05:07:00.000Z" },
             { id: "2", text: "Plain" },
-            { id: "", text: "no id" },
           ],
           meta: { next_token: "nt" },
         }),
@@ -254,7 +251,6 @@ describe("Pinterest read", () => {
           { id: "P2", title: null, description: null, created_at: "2026-11-08T05:09:00+00:00" },
           { id: "P3", created_at: "garbage" },
           { id: "P4" },
-          { title: "no id" },
         ],
         bookmark: "bm",
       }),

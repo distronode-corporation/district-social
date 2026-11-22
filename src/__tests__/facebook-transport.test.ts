@@ -204,6 +204,15 @@ describe("facebook transport", () => {
       expect(result.ref).toBe("page-1_777");
     });
 
+    it.each([["an empty string", ""], ["a number", 777]])(
+      "treats a photo id that is %s like a missing one, keeping the post ref",
+      async (_label, id) => {
+        graphRequestMock.mockResolvedValue({ id, post_id: "page-1_777" });
+        const result = await facebookTransport.publishNow(input({ media: [image()] }));
+        expect(result.ref).toBe("page-1_777");
+      },
+    );
+
     it("throws a clear, named error rather than posting one of multiple attached images", async () => {
       const images = [image({ url: "https://cdn/1.png" }), image({ url: "https://cdn/2.png" })];
       await expect(facebookTransport.publishNow(input({ media: images }))).rejects.toThrow(
@@ -528,6 +537,13 @@ describe("facebook transport", () => {
       );
     });
 
+    it("refuses a delete that answers success: false, rather than reporting it deleted", async () => {
+      graphRequestMock.mockResolvedValue({ success: false });
+      await expect(facebookTransport.deletePost("page-1_1")).rejects.toThrow(
+        /meta DELETE :id: unexpected response shape at success: expected true, got a boolean/,
+      );
+    });
+
     /** DELETE answers "does not exist"; every read (the Page probe) succeeds. */
     const goneButPageReadable = async (_id: string, opts?: { method?: string }) => {
       if (opts?.method === "DELETE") throw notFound();
@@ -600,7 +616,10 @@ describe("facebook transport", () => {
     it("still deletes the photo when the story is already gone", async () => {
       // The retry path after a partial failure, and the case where Meta DOES
       // cascade: "already gone" on the story must not abort the photo cleanup.
-      graphRequestMock.mockRejectedValueOnce(notFound()).mockResolvedValue({ success: true });
+      graphRequestMock
+        .mockRejectedValueOnce(notFound())
+        .mockResolvedValueOnce({ id: "page-1" }) // the token still reads its own Page
+        .mockResolvedValue({ success: true });
 
       await facebookTransport.deletePost("page-1_777:photo:photo-1");
 

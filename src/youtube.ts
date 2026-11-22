@@ -43,6 +43,7 @@
 
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { shape, type Shape } from "./http/shape.js";
 
 /**
  * YouTube refuses `<` and `>` in a title or description: snippet.title and
@@ -183,11 +184,11 @@ function wrapAs(method: string, path: string): (status: 0, message: string) => Y
   return (status, message) => new YouTubeError(status, message, method, path);
 }
 
-async function request<T>(
+async function request(
   method: string,
   path: string,
   opts: { timeoutMs?: number; base?: string } = {},
-): Promise<T> {
+): Promise<unknown> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const resOpts: VendorFetchOptions = { timeoutMs, wrap: wrapAs(method, path) };
@@ -197,12 +198,13 @@ async function request<T>(
     resOpts,
   );
   // DELETE returns 204 with no body on success — nothing to parse.
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) return undefined;
   const text = await vendorText(res, resOpts);
   if (!res.ok) throw new YouTubeError(res.status, text, method, path, retryAfterHeader(res));
-  if (!text) return undefined as T;
+  if (!text) return undefined;
+  // Each caller reads the body through a Shape (shape.ts).
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch {
     throw new YouTubeError(res.status, `expected JSON, got: ${text.slice(0, 200)}`, method, path);
   }
@@ -249,20 +251,31 @@ export interface YouTubeVideo {
   privacyStatus?: YouTubePrivacyStatus;
 }
 
-interface VideoResource {
-  id: string;
-  snippet?: { title?: string; description?: string; tags?: string[]; categoryId?: string };
-  status?: { privacyStatus?: string };
+/** The three documented privacy values; any other is refused rather than dropped. */
+const PRIVACY_STATUSES: readonly YouTubePrivacyStatus[] = ["public", "unlisted", "private"];
+
+/**
+ * A Video resource, every field this client reads checked: `id` a non-empty
+ * string, `snippet.title` an optional string, `status.privacyStatus` one of
+ * the documented values or absent.
+ */
+function toVideo(s: Shape, value: unknown, at: string): YouTubeVideo {
+  const r = s.obj(value, at);
+  const privacy = s.optStr(s.optObj(r.status, `${at}.status`)?.privacyStatus, `${at}.status.privacyStatus`);
+  return {
+    id: s.id(r.id, `${at}.id`),
+    title: s.optStr(s.optObj(r.snippet, `${at}.snippet`)?.title, `${at}.snippet.title`),
+    privacyStatus:
+      privacy === undefined
+        ? undefined
+        : (PRIVACY_STATUSES.find((p) => p === privacy) ??
+          s.fail(`${at}.status.privacyStatus`, `one of ${PRIVACY_STATUSES.join(", ")}`, privacy)),
+  };
 }
 
-function toVideo(r: VideoResource): YouTubeVideo {
-  const privacy = r.status?.privacyStatus;
-  return {
-    id: r.id,
-    title: r.snippet?.title,
-    privacyStatus:
-      privacy === "public" || privacy === "unlisted" || privacy === "private" ? privacy : undefined,
-  };
+/** The `items` of a list response; an absent `items` (an empty answer) reads as none. */
+function items(s: Shape, parsed: unknown): unknown[] {
+  return s.optArr(s.obj(parsed, "(body)").items, "items") ?? [];
 }
 
 /**
@@ -376,13 +389,14 @@ export async function insertVideo(input: YouTubeUploadInput): Promise<YouTubeVid
       "/upload/videos (bytes)",
     );
   }
-  let parsed: VideoResource;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text) as VideoResource;
+    parsed = JSON.parse(text) as unknown;
   } catch {
     throw new YouTubeError(uploadRes.status, `expected JSON, got: ${text.slice(0, 200)}`, "PUT", "/upload/videos (bytes)");
   }
-  return toVideo(parsed);
+  // A 2xx whose resource cannot be read is a shape error: an unknown outcome, never re-uploaded.
+  return toVideo(shape("youtube", "PUT /upload/videos (bytes)"), parsed, "(body)");
 }
 
 /**
@@ -401,8 +415,9 @@ export async function insertVideo(input: YouTubeUploadInput): Promise<YouTubeVid
  */
 export async function getVideos(ids: string[]): Promise<YouTubeVideo[]> {
   if (!ids.length) return [];
-  const res = await request<{ items: VideoResource[] }>("GET", withQuery("/videos", { part: "id", id: ids.join(",") }));
-  return (res.items ?? []).map(toVideo);
+  const s = shape("youtube", "GET /videos?part=id");
+  const res = await request("GET", withQuery("/videos", { part: "id", id: ids.join(",") }));
+  return items(s, res).map((v, i) => toVideo(s, v, `items[${i}]`));
 }
 
 /**
@@ -426,23 +441,30 @@ export interface YouTubeVideoStats {
   comments?: number;
 }
 
-function toCount(raw: unknown): number | undefined {
-  if (typeof raw !== "string" && typeof raw !== "number") return undefined;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : undefined;
+/**
+ * A counter: absent stays absent; otherwise a finite number or a string of
+ * digits (the Data API's unsigned longs), or a decimal string (an Analytics
+ * ratio). Anything else is refused.
+ */
+function toCount(s: Shape, raw: unknown, at: string): number | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && /^\d{1,20}(\.\d{1,20})?$/.test(raw)) return Number(raw);
+  return s.fail(at, "a count (a finite number or a string of digits)", raw);
 }
 
 export async function getVideoStats(ids: string[]): Promise<YouTubeVideoStats[]> {
   if (!ids.length) return [];
-  const res = await request<{
-    items: Array<{ id: string; statistics?: Record<string, unknown> }>;
-  }>("GET", withQuery("/videos", { part: "statistics", id: ids.join(",") }));
-  return (res.items ?? []).map((item) => {
-    const st = item.statistics ?? {};
-    const out: YouTubeVideoStats = { id: item.id };
-    const views = toCount(st.viewCount);
-    const likes = toCount(st.likeCount);
-    const comments = toCount(st.commentCount);
+  const s = shape("youtube", "GET /videos?part=statistics");
+  const res = await request("GET", withQuery("/videos", { part: "statistics", id: ids.join(",") }));
+  return items(s, res).map((value, i) => {
+    const at = `items[${i}]`;
+    const item = s.obj(value, at);
+    const st = s.optObj(item.statistics, `${at}.statistics`) ?? {};
+    const out: YouTubeVideoStats = { id: s.id(item.id, `${at}.id`) };
+    const views = toCount(s, st.viewCount, `${at}.statistics.viewCount`);
+    const likes = toCount(s, st.likeCount, `${at}.statistics.likeCount`);
+    const comments = toCount(s, st.commentCount, `${at}.statistics.commentCount`);
     if (views !== undefined) out.views = views;
     if (likes !== undefined) out.likes = likes;
     if (comments !== undefined) out.comments = comments;
@@ -458,20 +480,18 @@ export interface YouTubeChannelStats {
 }
 
 export async function getMyChannelStats(): Promise<YouTubeChannelStats> {
-  const res = await request<{ items: Array<{ statistics?: Record<string, unknown> }> }>(
-    "GET",
-    withQuery("/channels", { part: "statistics", mine: "true" }),
-  );
-  const st = res.items?.[0]?.statistics;
+  const s = shape("youtube", "GET /channels?part=statistics");
+  const first = items(s, await request("GET", withQuery("/channels", { part: "statistics", mine: "true" })))[0];
+  const st = first === undefined ? undefined : s.optObj(s.obj(first, "items[0]").statistics, "items[0].statistics");
   if (!st) {
     throw new YouTubeError(0, "no channel found for this credential (mine=true returned zero items)", "GET", "/channels");
   }
   const out: YouTubeChannelStats = {};
   // ⚠️ hiddenSubscriberCount makes subscriberCount absent OR zero depending on
   // the channel; an absent value stays absent rather than becoming a real 0.
-  const subs = toCount(st.subscriberCount);
-  const views = toCount(st.viewCount);
-  const videos = toCount(st.videoCount);
+  const subs = toCount(s, st.subscriberCount, "items[0].statistics.subscriberCount");
+  const views = toCount(s, st.viewCount, "items[0].statistics.viewCount");
+  const videos = toCount(s, st.videoCount, "items[0].statistics.videoCount");
   if (subs !== undefined) out.subscribers = subs;
   if (views !== undefined) out.views = views;
   if (videos !== undefined) out.videos = videos;
@@ -486,7 +506,8 @@ export async function getMyChannelStats(): Promise<YouTubeChannelStats> {
  * decision belongs to the transport, exactly like pinterest.ts's deletePin.
  */
 export async function deleteVideo(id: string): Promise<void> {
-  await request<void>("DELETE", withQuery("/videos", { id }));
+  // 204 with no body; nothing to read.
+  await request("DELETE", withQuery("/videos", { id }));
 }
 
 export interface YouTubeChannel {
@@ -502,15 +523,16 @@ export interface YouTubeChannel {
  * channels owned by the authenticated user." Used only for connectStatus().
  */
 export async function getMyChannel(): Promise<YouTubeChannel> {
-  const res = await request<{ items: Array<{ id: string; snippet?: { title?: string } }> }>(
-    "GET",
-    withQuery("/channels", { part: "snippet", mine: "true" }),
-  );
-  const channel = res.items?.[0];
-  if (!channel) {
+  const s = shape("youtube", "GET /channels?part=snippet");
+  const first = items(s, await request("GET", withQuery("/channels", { part: "snippet", mine: "true" })))[0];
+  if (first === undefined) {
     throw new YouTubeError(0, "no channel found for this credential (mine=true returned zero items)", "GET", "/channels");
   }
-  return { id: channel.id, title: channel.snippet?.title ?? "" };
+  const channel = s.obj(first, "items[0]");
+  return {
+    id: s.id(channel.id, "items[0].id"),
+    title: s.optStr(s.optObj(channel.snippet, "items[0].snippet")?.title, "items[0].snippet.title") ?? "",
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -607,10 +629,6 @@ function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-interface AnalyticsReport {
-  columnHeaders?: Array<{ name?: string; columnType?: string }>;
-  rows?: unknown[][];
-}
 
 /**
  * columnHeaders plus the first row, as a bag keyed by YouTube's metric names.
@@ -620,13 +638,24 @@ interface AnalyticsReport {
  * all (the documented form), and both read as an EMPTY bag. Showing 0 minutes
  * watched for a video uploaded an hour ago would be a lie.
  */
-function toReportBag(report: AnalyticsReport | undefined): Record<string, number> {
-  const row = report?.rows?.[0];
-  if (!row) return {};
+function toReportBag(parsed: unknown): Record<string, number> {
+  const s = shape("youtube", "GET /reports");
+  const report = s.obj(parsed ?? {}, "(body)");
+  const rows = s.optArr(report.rows, "rows") ?? [];
+  if (!rows.length) return {};
+  const row = s.arr(rows[0], "rows[0]");
+  const headers = s.optEach(report.columnHeaders, "columnHeaders", (h, at) => {
+    const header = s.obj(h, at);
+    const columnType = s.optStr(header.columnType, `${at}.columnType`);
+    if (columnType !== undefined && columnType !== "DIMENSION" && columnType !== "METRIC") {
+      s.fail(`${at}.columnType`, "one of DIMENSION, METRIC", columnType);
+    }
+    return { name: s.optStr(header.name, `${at}.name`), columnType };
+  });
   const out: Record<string, number> = {};
-  (report.columnHeaders ?? []).forEach((header, i) => {
+  headers.forEach((header, i) => {
     if (header.columnType !== "METRIC" || !header.name) return;
-    const value = toCount(row[i]);
+    const value = toCount(s, row[i], `rows[0][${i}]`);
     if (value !== undefined) out[header.name] = value;
   });
   return out;
@@ -660,7 +689,7 @@ async function analyticsReport(params: {
     filters: params.filters,
   });
   try {
-    return toReportBag(await request<AnalyticsReport | undefined>("GET", path, { base: ANALYTICS_BASE }));
+    return toReportBag(await request("GET", path, { base: ANALYTICS_BASE }));
   } catch (err) {
     // Only the scope refusal is rewritten. Any other 403 (the API disabled on
     // the client's project, say) keeps the vendor's own body.

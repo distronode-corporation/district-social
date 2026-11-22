@@ -50,9 +50,9 @@ describe("token resolver", () => {
 });
 
 describe("empty and sparse answers", () => {
-  it("reads an empty 200 body as no accounts", async () => {
+  it("refuses an empty 200 body rather than reading it as no connected accounts", async () => {
     fetchMock.mockResolvedValue(response(200, ""));
-    await expect(listAccounts()).resolves.toEqual([]);
+    await expect(listAccounts()).rejects.toThrow(/zernio GET \/accounts: unexpected response shape at \(body\): expected an object, got null/);
   });
 
   it("reads a body with no accounts key as no accounts", async () => {

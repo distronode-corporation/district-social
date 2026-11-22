@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { setEngineDeployment } from "../settings.js";
+import { ResponseShapeError } from "../http/shape.js";
 import { FIXTURE_REDDIT_USER_AGENT } from "./helpers/fixtures.js";
 
 /**
@@ -257,12 +258,23 @@ describe("getPostStats", () => {
     await expect(getPostStats(["t3_a", "t3_b"])).resolves.toEqual([{ name: "t3_b", score: 6 }]);
   });
 
-  it("drops a counter the vendor sent as a string rather than coercing it", async () => {
+  it("refuses a counter the vendor sent as a string rather than coercing or dropping it", async () => {
     fetchMock().mockResolvedValue(
       jsonResponse(200, { data: { children: [{ data: { name: "t3_a", score: "42" } }] } }),
     );
 
-    await expect(getPostStats(["t3_a"])).resolves.toEqual([{ name: "t3_a" }]);
+    const err = await getPostStats(["t3_a"]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    expect((err as Error).message).toBe(
+      "reddit GET /api/info: unexpected response shape at data.children[0].data.score: expected a finite number, got a string",
+    );
+  });
+
+  it("refuses a listing whose children or child data are the wrong type", async () => {
+    for (const body of [{ data: { children: {} } }, { data: { children: ["x"] } }, { data: { children: [{ data: 1 }] } }, { data: [] }, []]) {
+      fetchMock().mockResolvedValueOnce(jsonResponse(200, body));
+      await expect(getPostStats(["t3_a"])).rejects.toBeInstanceOf(ResponseShapeError);
+    }
   });
 
   it("tolerates a listing with no data or children key", async () => {
@@ -317,11 +329,17 @@ describe("getMe karma fields", () => {
     expect("commentKarma" in profile).toBe(false);
   });
 
-  it("ignores a karma value that is not a number", async () => {
+  it("refuses a karma value that is not a number", async () => {
     fetchMock().mockResolvedValue(jsonResponse(200, { id: "u1", name: "d", link_karma: "12" }));
 
-    const profile = await getMe();
-    expect("linkKarma" in profile).toBe(false);
+    await expect(getMe()).rejects.toThrow("reddit GET /api/v1/me: unexpected response shape at link_karma: expected a finite number, got a string");
+  });
+
+  it("refuses an id or name of the wrong type, and a body that is not an object", async () => {
+    for (const body of [{ id: 1, name: "d" }, { id: "u1", name: false }, ["u1"]]) {
+      fetchMock().mockResolvedValueOnce(jsonResponse(200, body));
+      await expect(getMe()).rejects.toBeInstanceOf(ResponseShapeError);
+    }
   });
 
   it("reports a zero karma count as zero", async () => {
@@ -368,17 +386,26 @@ describe("getSubredditAbout", () => {
   });
 });
 
-describe("getLinkFlair defensive parsing", () => {
-  it("skips a null or primitive entry inside the array", async () => {
-    fetchMock().mockResolvedValue(jsonResponse(200, [null, "flair", 7, { id: "f1", text: "News" }]));
-    await expect(getLinkFlair("test")).resolves.toEqual([{ id: "f1", text: "News" }]);
+describe("getLinkFlair hostile input", () => {
+  it("refuses a null or primitive entry inside the array", async () => {
+    for (const entry of [null, "flair", 7]) {
+      fetchMock().mockResolvedValueOnce(jsonResponse(200, [entry, { id: "f1", text: "News" }]));
+      await expect(getLinkFlair("test")).rejects.toThrow(
+        "reddit GET /r/:subreddit/api/link_flair_v2: unexpected response shape at (body)[0]: expected an object",
+      );
+    }
   });
 
-  it("skips an entry whose id or text is the wrong type", async () => {
-    fetchMock().mockResolvedValue(
-      jsonResponse(200, [{ id: 1, text: "News" }, { id: "f2", text: 2 }, { id: "f3", text: "Ok" }]),
-    );
-    await expect(getLinkFlair("test")).resolves.toEqual([{ id: "f3", text: "Ok" }]);
+  it("refuses an entry whose id or text is the wrong type", async () => {
+    fetchMock().mockResolvedValueOnce(jsonResponse(200, [{ id: 1, text: "News" }]));
+    await expect(getLinkFlair("test")).rejects.toThrow("at (body)[0].id: expected a non-empty string, got a number");
+    fetchMock().mockResolvedValueOnce(jsonResponse(200, [{ id: "f2", text: 2 }]));
+    await expect(getLinkFlair("test")).rejects.toThrow("at (body)[0].text: expected a string, got a number");
+  });
+
+  it("reads an empty body as no flair", async () => {
+    fetchMock().mockResolvedValue(new Response("", { status: 200 }));
+    await expect(getLinkFlair("test")).resolves.toEqual([]);
   });
 });
 

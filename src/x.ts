@@ -29,6 +29,7 @@
 import type { RecentPostsPage } from "./recent-posts.js";
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { BODY_KEY, shape, type Shape } from "./http/shape.js";
 
 const BASE_URL = "https://api.x.com/2";
 
@@ -113,7 +114,7 @@ async function token(): Promise<string> {
   return t;
 }
 
-async function request<T>(method: string, path: string, opts: { body?: unknown; timeoutMs?: number } = {}): Promise<T> {
+async function request(method: string, path: string, opts: { body?: unknown; timeoutMs?: number } = {}): Promise<unknown> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const resOpts: VendorFetchOptions = { timeoutMs, wrap: (status, message) => new XError(status, message, method, path) };
@@ -131,9 +132,9 @@ async function request<T>(method: string, path: string, opts: { body?: unknown; 
   );
   const text = await vendorText(res, resOpts);
   if (!res.ok) throw new XError(res.status, text, method, path, retryAfterHeader(res));
-  if (!text) return undefined as T;
+  if (!text) return undefined;
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch {
     throw new XError(res.status, `expected JSON, got: ${text.slice(0, 200)}`, method, path);
   }
@@ -148,7 +149,7 @@ async function request<T>(method: string, path: string, opts: { body?: unknown; 
  * is set here on purpose — fetch computes the multipart boundary itself from
  * the FormData instance, and setting one manually would strip it.
  */
-async function mediaUploadRequest<T>(form: FormData, opts: { timeoutMs?: number } = {}): Promise<T> {
+async function mediaUploadRequest(form: FormData, opts: { timeoutMs?: number } = {}): Promise<unknown> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? MEDIA_UPLOAD_TIMEOUT_MS;
   const resOpts: VendorFetchOptions = {
@@ -165,9 +166,9 @@ async function mediaUploadRequest<T>(form: FormData, opts: { timeoutMs?: number 
   if (!res.ok) {
     throw new XError(res.status, text, "POST", "/media/upload", retryAfterHeader(res));
   }
-  if (!text) return undefined as T;
+  if (!text) return undefined;
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch {
     throw new XError(res.status, `expected JSON, got: ${text.slice(0, 200)}`, "POST", "/media/upload");
   }
@@ -190,11 +191,13 @@ async function mediaStatusRequest(mediaId: string): Promise<XMediaUploadResponse
     throw new XError(res.status, text, "GET", "/media/upload", retryAfterHeader(res));
   }
   if (!text) return {};
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as XMediaUploadResponse;
+    parsed = JSON.parse(text) as unknown;
   } catch {
     throw new XError(res.status, `expected JSON, got: ${text.slice(0, 200)}`, "GET", "/media/upload");
   }
+  return readMediaUploadResponse(parsed, "GET /media/upload STATUS");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -226,9 +229,6 @@ export interface XTweet {
   text: string;
 }
 
-interface CreateTweetResponse {
-  data?: { id?: string; text?: string };
-}
 
 /**
  * POST /2/tweets. VERIFIED against https://docs.x.com/x-api/posts/create-post:
@@ -246,11 +246,14 @@ export async function createTweet(input: CreateTweetInput): Promise<XTweet> {
   if (input.mediaIds?.length) body.media = { media_ids: input.mediaIds };
   if (input.replySettings) body.reply_settings = input.replySettings;
 
-  const res = await request<CreateTweetResponse>("POST", "/tweets", { body });
-  if (!res.data?.id) {
-    throw new XError(0, `tweet created but no id was returned: ${JSON.stringify(res).slice(0, 200)}`, "POST", "/tweets");
+  const s = shape("x", "POST /tweets");
+  const res = s.obj(await request("POST", "/tweets", { body }), "(body)");
+  const data = s.optObj(res.data, "data");
+  const id = s.optId(data?.id, "data.id");
+  if (!id) {
+    throw new XError(0, "tweet created but no id was returned", "POST", "/tweets");
   }
-  return { id: res.data.id, text: res.data.text ?? input.text };
+  return { id, text: s.optStr(data?.text, "data.text") ?? input.text };
 }
 
 /**
@@ -268,7 +271,13 @@ export async function createTweet(input: CreateTweetInput): Promise<XTweet> {
  * the documented error schema, not a confirmed worked example.
  */
 export async function deleteTweet(id: string): Promise<void> {
-  await request<void>("DELETE", `/tweets/${encodeURIComponent(id)}`);
+  // `{ data: { deleted: true } }`, or no body. A `deleted: false` is refused:
+  // the caller would otherwise report a post as deleted that X says is not.
+  const res = await request("DELETE", `/tweets/${encodeURIComponent(id)}`);
+  if (res === undefined) return;
+  const s = shape("x", "DELETE /tweets/:id");
+  const deleted = s.optBool(s.optObj(s.obj(res, "(body)").data, "data")?.deleted, "data.deleted");
+  if (deleted === false) s.fail("data.deleted", "true", deleted);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -291,9 +300,17 @@ export interface XTweetsBatchResult {
   errors: XProblem[];
 }
 
-interface GetTweetsResponse {
-  data?: Array<{ id: string; text?: string }>;
-  errors?: XProblem[];
+/** One RFC 7807 problem from a batch lookup's `errors`, every field optional. */
+function readProblem(s: Shape, value: unknown, at: string): XProblem {
+  const p = s.obj(value, at);
+  const problem: XProblem = {};
+  for (const key of ["type", "title", "detail", "resource_id", "resource_type", "parameter", "value"] as const) {
+    const v = s.optStr(p[key], `${at}.${key}`);
+    if (v !== undefined) problem[key] = v;
+  }
+  const status = s.optNum(p.status, `${at}.status`);
+  if (status !== undefined) problem.status = status;
+  return problem;
 }
 
 /**
@@ -317,10 +334,14 @@ interface GetTweetsResponse {
  */
 export async function getTweetsBatch(ids: string[]): Promise<XTweetsBatchResult> {
   if (!ids.length) return { data: [], errors: [] };
-  const res = await request<GetTweetsResponse>("GET", `/tweets?ids=${ids.map(encodeURIComponent).join(",")}`);
+  const s = shape("x", "GET /tweets");
+  const res = s.obj(await request("GET", `/tweets?ids=${ids.map(encodeURIComponent).join(",")}`), "(body)");
   return {
-    data: (res.data ?? []).map((t) => ({ id: t.id, text: t.text ?? "" })),
-    errors: res.errors ?? [],
+    data: s.optEach(res.data, "data", (t, at) => {
+      const tweet = s.obj(t, at);
+      return { id: s.id(tweet.id, `${at}.id`), text: s.optStr(tweet.text, `${at}.text`) ?? "" };
+    }),
+    errors: s.optEach(res.errors, "errors", (p, at) => readProblem(s, p, at)),
   };
 }
 
@@ -346,7 +367,36 @@ interface XProcessingInfo {
 }
 
 interface XMediaUploadResponse {
-  data?: { id?: string; media_key?: string; processing_info?: XProcessingInfo };
+  data?: { id?: string; processing_info?: XProcessingInfo };
+}
+
+/** A media upload or STATUS answer: the fields uploadMedia and ensureProcessed read. */
+/** X's documented processing states. Any other is refused: it would read as "finished" and attach an unready id. */
+const PROCESSING_STATES = ["pending", "in_progress", "succeeded", "failed"] as const;
+
+function processingState(s: Shape, value: unknown): string | undefined {
+  const state = s.optStr(value, "data.processing_info.state");
+  if (state === undefined) return undefined;
+  return PROCESSING_STATES.find((v) => v === state) ?? s.fail("data.processing_info.state", `one of ${PROCESSING_STATES.join(", ")}`, state);
+}
+
+function readMediaUploadResponse(value: unknown, operation: string): XMediaUploadResponse {
+  if (value === undefined) return {};
+  const s = shape("x", operation);
+  const data = s.optObj(s.obj(value, "(body)").data, "data");
+  if (!data) return {};
+  const info = s.optObj(data.processing_info, "data.processing_info");
+  const error = s.optObj(info?.error, "data.processing_info.error");
+  return {
+    data: {
+      id: s.optId(data.id, "data.id"),
+      processing_info: info && {
+        state: processingState(s, info.state),
+        check_after_secs: s.optNum(info.check_after_secs, "data.processing_info.check_after_secs"),
+        error: error && { message: s.optStr(error.message, "data.processing_info.error.message") },
+      },
+    },
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -424,10 +474,10 @@ export async function uploadMedia(
   initForm.set("media_type", mimeType);
   initForm.set("total_bytes", String(bytes.byteLength));
   initForm.set("media_category", category);
-  const initRes = await mediaUploadRequest<XMediaUploadResponse>(initForm);
+  const initRes = readMediaUploadResponse(await mediaUploadRequest(initForm), "POST /media/upload INIT");
   const mediaId = initRes.data?.id;
   if (!mediaId) {
-    throw new XError(0, `media INIT returned no id: ${JSON.stringify(initRes).slice(0, 200)}`, "POST", "/media/upload");
+    throw new XError(0, "media INIT returned no id", "POST", "/media/upload");
   }
 
   // A zero-byte asset would otherwise send NO append at all and then FINALIZE,
@@ -443,13 +493,13 @@ export async function uploadMedia(
     appendForm.set("media_id", mediaId);
     appendForm.set("segment_index", String(segment));
     appendForm.set("media", new Blob([chunk], { type: mimeType }));
-    await mediaUploadRequest<void>(appendForm);
+    await mediaUploadRequest(appendForm);
   }
 
   const finalizeForm = new FormData();
   finalizeForm.set("command", "FINALIZE");
   finalizeForm.set("media_id", mediaId);
-  const finalizeRes = await mediaUploadRequest<XMediaUploadResponse>(finalizeForm);
+  const finalizeRes = readMediaUploadResponse(await mediaUploadRequest(finalizeForm), "POST /media/upload FINALIZE");
 
   // For video and GIF this is the PRIMARY path, not the defensive one it was
   // for images: X documents both as requiring server-side processing after
@@ -497,9 +547,6 @@ export interface XProfile {
   name?: string;
 }
 
-interface GetMeResponse {
-  data?: { id?: string; username?: string; name?: string };
-}
 
 /**
  * GET /2/users/me. VERIFIED against
@@ -510,11 +557,15 @@ interface GetMeResponse {
  * injected resolver supplies.
  */
 export async function getMe(): Promise<XProfile> {
-  const res = await request<GetMeResponse>("GET", "/users/me");
-  if (!res.data?.id || !res.data.username) {
-    throw new XError(0, `GET /users/me returned no id/username: ${JSON.stringify(res).slice(0, 200)}`, "GET", "/users/me");
+  const s = shape("x", "GET /users/me");
+  const res = s.obj(await request("GET", "/users/me"), "(body)");
+  const data = s.optObj(res.data, "data");
+  const id = s.optId(data?.id, "data.id");
+  const username = s.optId(data?.username, "data.username");
+  if (!id || !username) {
+    throw new XError(0, "GET /users/me returned no id/username", "GET", "/users/me");
   }
-  return { id: res.data.id, username: res.data.username, name: res.data.name };
+  return { id, username, name: s.optStr(data?.name, "data.name") };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -540,30 +591,29 @@ export async function getMe(): Promise<XProfile> {
  * they 403 for posts older than 30 days — which would fail the whole call for
  * an old post rather than returning the public numbers that ARE available.
  */
-interface XPublicMetrics {
-  retweet_count?: unknown;
-  reply_count?: unknown;
-  like_count?: unknown;
-  quote_count?: unknown;
-  bookmark_count?: unknown;
-  impression_count?: unknown;
-}
-
 function finiteOnly(bag: Record<string, unknown> | undefined): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(bag ?? {})) {
-    // Absent, never 0 — but a vendor-reported zero is kept.
-    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+    // publicMetrics has refused anything but a finite number or null: a null
+    // stays absent, never 0, and a vendor-reported zero is kept.
+    if (typeof value === "number") out[key] = value;
   }
   return out;
 }
 
+/** `data.public_metrics` of a lookup: an object or absent. Its values are filtered by finiteOnly. */
+function publicMetrics(value: unknown, operation: string): Record<string, unknown> | undefined {
+  const s = shape("x", operation);
+  const bag = s.optObj(s.optObj(s.obj(value, "(body)").data, "data")?.public_metrics, "data.public_metrics");
+  // Every public metric is a scalar count: a present value that is not a
+  // finite number is refused (a null is absent), so "reported but invalid"
+  // never reads like "not reported".
+  for (const v of Object.values(bag ?? {})) s.optNum(v, `data.public_metrics${BODY_KEY}`);
+  return bag;
+}
+
 export async function getTweetMetrics(id: string): Promise<Record<string, number>> {
-  const res = await request<{ data?: { public_metrics?: XPublicMetrics } }>(
-    "GET",
-    `/tweets/${encodeURIComponent(id)}?tweet.fields=public_metrics`,
-  );
-  return finiteOnly(res.data?.public_metrics as Record<string, unknown> | undefined);
+  return finiteOnly(publicMetrics(await request("GET", `/tweets/${encodeURIComponent(id)}?tweet.fields=public_metrics`), "GET /tweets/:id"));
 }
 
 /**
@@ -573,11 +623,7 @@ export async function getTweetMetrics(id: string): Promise<Record<string, number
  * but it still consumes the account's request allowance.
  */
 export async function getMyMetrics(): Promise<Record<string, number>> {
-  const res = await request<{ data?: { public_metrics?: Record<string, unknown> } }>(
-    "GET",
-    "/users/me?user.fields=public_metrics",
-  );
-  return finiteOnly(res.data?.public_metrics);
+  return finiteOnly(publicMetrics(await request("GET", "/users/me?user.fields=public_metrics"), "GET /users/me"));
 }
 
 /**
@@ -620,7 +666,7 @@ export const X_ALT_TEXT_MAX = 1000;
 export async function setMediaAltText(mediaId: string, altText: string): Promise<void> {
   const text = altText.trim();
   if (!text) return;
-  await request<unknown>("POST", "/media/metadata", {
+  await request("POST", "/media/metadata", {
     // X rejects alt text over 1000 characters for the whole request rather than
     // truncating it, which would fail the media metadata call for a long
     // description. Trimmed here so a verbose alt degrades instead of erroring.
@@ -632,10 +678,6 @@ export async function setMediaAltText(mediaId: string, altText: string): Promise
 /*  Recent posts (the agent publish's crash check)                             */
 /* -------------------------------------------------------------------------- */
 
-interface UserTweetsResponse {
-  data?: Array<{ id?: string; text?: string; created_at?: string; note_tweet?: { text?: string } }>;
-  meta?: { next_token?: string };
-}
 
 /**
  * `GET /2/users/{id}/tweets` from `since`, replies and reposts excluded: the
@@ -654,17 +696,18 @@ export async function listRecentTweets(since: Date): Promise<RecentPostsPage> {
     exclude: "replies,retweets",
     "tweet.fields": "created_at,note_tweet",
   });
-  const res = await request<UserTweetsResponse>("GET", `/users/${encodeURIComponent(me.id)}/tweets?${query.toString()}`);
-  const posts = (res.data ?? []).flatMap((t) =>
-    typeof t.id === "string" && t.id
-      ? [
-          {
-            id: t.id,
-            texts: [t.note_tweet?.text, t.text].filter((v): v is string => typeof v === "string"),
-            createdAt: t.created_at ?? null,
-          },
-        ]
-      : [],
-  );
-  return { posts, more: Boolean(res.meta?.next_token) };
+  const s = shape("x", "GET /users/:id/tweets");
+  const res = s.obj(await request("GET", `/users/${encodeURIComponent(me.id)}/tweets?${query.toString()}`), "(body)");
+  const posts = s.optEach(res.data, "data", (item, at) => {
+    const t = s.obj(item, at);
+    const note = s.optObj(t.note_tweet, `${at}.note_tweet`);
+    return {
+      id: s.id(t.id, `${at}.id`),
+      texts: [s.optStr(note?.text, `${at}.note_tweet.text`), s.optStr(t.text, `${at}.text`)].filter(
+        (v): v is string => v !== undefined,
+      ),
+      createdAt: s.optStr(t.created_at, `${at}.created_at`) ?? null,
+    };
+  });
+  return { posts, more: Boolean(s.optStr(s.optObj(res.meta, "meta")?.next_token, "meta.next_token")) };
 }

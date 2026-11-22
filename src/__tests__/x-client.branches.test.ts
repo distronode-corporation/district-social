@@ -33,7 +33,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 import {
-  XError,
   setXTokenResolver,
   createTweet,
   deleteTweet,
@@ -470,16 +469,19 @@ describe("x client failure vocabulary", () => {
      * each other on purpose. A stringified count, a null and a non-finite
      * number are all dropped; the honest zero stays.
      */
-    it("drops unreadable values but keeps a vendor-reported zero", async () => {
+    it("refuses an unreadable value, and keeps a vendor-reported zero", async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: { public_metrics: { like_count: "12" } } }));
+      await expect(getTweetMetrics("1750000000000000004")).rejects.toThrow(/data\.public_metrics\[\?\]: expected a finite number, got a string/);
+    });
+
+    it("leaves a null counter out and keeps a vendor-reported zero", async () => {
       fetchMock.mockResolvedValue(
         textResponse(
           200,
           JSON.stringify({
             data: {
               public_metrics: {
-                like_count: "12",
                 quote_count: null,
-                bookmark_count: { count: 3 },
                 reply_count: 0,
                 impression_count: 4210,
               },
@@ -519,12 +521,17 @@ describe("x client failure vocabulary", () => {
         textResponse(200, '{"data":{"public_metrics":{"followers_count":1e999}}}'),
       );
 
-      await expect(getFollowerCount()).rejects.toThrow(/refusing to report 0/);
-      await expect(getFollowerCount()).rejects.toBeInstanceOf(XError);
+      await expect(getFollowerCount()).rejects.toThrow(/data\.public_metrics\[\?\]: expected a finite number, got a non-finite number/);
     });
 
     it("refuses a followers_count the vendor sent as a string", async () => {
       fetchMock.mockResolvedValue(jsonResponse(200, { data: { public_metrics: { followers_count: "4210" } } }));
+
+      await expect(getFollowerCount()).rejects.toThrow(/data\.public_metrics\[\?\]: expected a finite number, got a string/);
+    });
+
+    it("refuses to report 0 when followers_count is absent", async () => {
+      fetchMock.mockResolvedValue(jsonResponse(200, { data: { public_metrics: { tweet_count: 1 } } }));
 
       await expect(getFollowerCount()).rejects.toThrow(/indistinguishable from a suspended account/);
     });

@@ -22,6 +22,7 @@
  */
 
 import { retryAfterHeader } from "./retry.js";
+import { shape, type JsonObject, type Shape } from "./http/shape.js";
 
 const BASE_URL = "https://zernio.com/api/v1";
 
@@ -121,10 +122,10 @@ async function token(): Promise<string> {
   return _tokenResolver();
 }
 
-async function request<T>(
+async function request(
   path: string,
   init: { method?: string; body?: unknown; timeoutMs?: number } = {},
-): Promise<T> {
+): Promise<unknown> {
   const bearer = await token();
   const res = await fetch(`${BASE_URL}${path}`, {
     method: init.method ?? "GET",
@@ -170,24 +171,30 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const err = (parsed ?? {}) as {
-      error?: string;
-      code?: string;
-      type?: string;
-      platform?: string;
-      platformError?: unknown;
-    };
-    throw new ZernioError(err.error || text || `Zernio ${res.status}`, res.status, {
-      code: err.code,
-      type: err.type,
-      platform: err.platform,
+    // The failure path: each field is kept only when it is a string, so a
+    // malformed error body still reports the HTTP failure.
+    const err: Record<string, unknown> =
+      typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+    const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+    throw new ZernioError(str(err.error) || text || `Zernio ${res.status}`, res.status, {
+      code: str(err.code),
+      type: str(err.type),
+      platform: str(err.platform),
       platformError: err.platformError,
       retryAfter: retryAfterHeader(res),
     });
   }
 
-  return parsed as T;
+  // Each caller reads the body through a Shape (shape.ts).
+  return parsed;
 }
+
+/** A 2xx body as an object, for `operation`'s Shape. An empty body is refused like any non-object. */
+function zernioBody(operation: string, parsed: unknown): { s: Shape; body: JsonObject } {
+  const s = shape("zernio", operation);
+  return { s, body: s.obj(parsed, "(body)") };
+}
+
 
 /* -------------------------------------------------------------------------- */
 /*  Accounts                                                                   */
@@ -216,8 +223,21 @@ export async function listAccounts(): Promise<ZernioAccount[]> {
   // "invalid_field_value"}`, verified against the live API. This is
   // not in the OpenAPI spec, which documents the two as independent optional
   // query parameters, so it can only be found by calling it.
-  const body = await request<{ accounts?: ZernioAccount[] }>("/accounts?page=1&limit=100");
-  return body?.accounts ?? [];
+  const { s, body } = zernioBody("GET /accounts", await request("/accounts?page=1&limit=100"));
+  return s.optEach(body.accounts, "accounts", (item, at) => {
+    const a = s.obj(item, at);
+    const account: ZernioAccount = { _id: s.id(a._id, `${at}._id`), platform: s.id(a.platform, `${at}.platform`) };
+    const username = s.optStr(a.username, `${at}.username`);
+    const displayName = s.optStr(a.displayName, `${at}.displayName`);
+    // An empty URL or id reads as absent (the aggregator treats "" that way already); refusing it could fail a live create.
+    const profileUrl = s.optStr(a.profileUrl, `${at}.profileUrl`) || undefined;
+    const isActive = s.optBool(a.isActive, `${at}.isActive`);
+    if (username !== undefined) account.username = username;
+    if (displayName !== undefined) account.displayName = displayName;
+    if (profileUrl !== undefined) account.profileUrl = profileUrl;
+    if (isActive !== undefined) account.isActive = isActive;
+    return account;
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -288,15 +308,26 @@ export interface ZernioPlatformTarget {
 export interface ZernioPlatformResult {
   platform: string;
   accountId?: string;
-  status: "pending" | "published" | "failed";
+  /**
+   * The aggregator acts on `published` and `failed` only; every other state
+   * Zernio reports (pending, processing, uploading, cancelled, ...) reads as
+   * not finished. Type-checked, not held to a list: a state Zernio adds must
+   * not fail a create whose post may already be live.
+   */
+  status: string;
   platformPostId?: string;
   platformPostUrl?: string;
   error?: string;
 }
 
 export interface ZernioPost {
-  _id: string;
-  status: "draft" | "scheduled" | "published" | "failed" | "cancelled";
+  /**
+   * Absent only when Zernio answered without one; the aggregator turns that
+   * into its NO_POST_ID failure, whose message names the manual recovery.
+   */
+  _id?: string;
+  /** Type-checked, not held to a list (partial, publishing, ... exist): see ZernioPlatformResult.status. */
+  status?: string;
   platforms?: ZernioPlatformResult[];
 }
 
@@ -321,10 +352,37 @@ export interface ZernioPost {
  * live on the platform ("returned no post id", with a live post to delete by
  * hand). The list endpoint, by contrast, uses `{posts: [...]}`.
  */
-function unwrapPost(body: unknown): ZernioPost {
-  const envelope = body as { post?: ZernioPost } | ZernioPost | null;
-  const post = (envelope as { post?: ZernioPost })?.post ?? (envelope as ZernioPost);
-  return post ?? ({} as ZernioPost);
+function unwrapPost(operation: string, parsed: unknown): ZernioPost {
+  // An empty 200 is "no post id", which the aggregator reports as NO_POST_ID
+  // with the manual-recovery message; anything else must be an object.
+  if (parsed === null) return {};
+  const { s, body } = zernioBody(operation, parsed);
+  // `{message, post}`, or (older answers) the post itself at the top level.
+  const at = body.post === undefined || body.post === null ? "(body)" : "post";
+  const p = at === "post" ? s.obj(body.post, "post") : body;
+  const post: ZernioPost = {};
+  const id = s.optId(p._id, `${at}._id`);
+  const status = s.optStr(p.status, `${at}.status`);
+  if (id !== undefined) post._id = id;
+  if (status !== undefined) post.status = status;
+  const platforms = s.optArr(p.platforms, `${at}.platforms`);
+  if (platforms) {
+    post.platforms = platforms.map((item, i): ZernioPlatformResult => {
+      const lat = `${at}.platforms[${i}]`;
+      const leg = s.obj(item, lat);
+      const result: ZernioPlatformResult = {
+        platform: s.id(leg.platform, `${lat}.platform`),
+        // A leg with no status is still pending: nothing has reported an outcome.
+        status: s.optStr(leg.status, `${lat}.status`) ?? "pending",
+      };
+      for (const key of ["accountId", "platformPostId", "platformPostUrl", "error"] as const) {
+        const v = s.optStr(leg[key], `${lat}.${key}`);
+        if (v) result[key] = v;
+      }
+      return result;
+    });
+  }
+  return post;
 }
 
 export async function createPost(input: {
@@ -332,16 +390,16 @@ export async function createPost(input: {
   platforms: ZernioPlatformTarget[];
   mediaItems?: ZernioMediaItem[];
 }): Promise<ZernioPost> {
-  const body = await request<unknown>("/posts", {
+  const body = await request("/posts", {
     method: "POST",
     body: { ...input, publishNow: true },
     timeoutMs: PUBLISH_TIMEOUT_MS,
   });
-  return unwrapPost(body);
+  return unwrapPost("POST /posts", body);
 }
 
 export async function getPost(postId: string): Promise<ZernioPost> {
-  return unwrapPost(await request<unknown>(`/posts/${encodeURIComponent(postId)}`));
+  return unwrapPost("GET /posts/:id", await request(`/posts/${encodeURIComponent(postId)}`));
 }
 
 /**
@@ -415,7 +473,68 @@ export interface ZernioAnalyticsReport {
  * which is why the aggregator memoises this rather than calling it per leg.
  */
 export async function getAnalytics(): Promise<ZernioAnalyticsReport> {
-  return request<ZernioAnalyticsReport>("/analytics");
+  const { s, body } = zernioBody("GET /analytics", await request("/analytics"));
+  const report: ZernioAnalyticsReport = {};
+  const overview = s.optObj(body.overview, "overview");
+  if (overview) {
+    report.overview = {};
+    for (const key of ["totalPosts", "publishedPosts", "scheduledPosts"] as const) {
+      const v = s.optNum(overview[key], `overview.${key}`);
+      if (v !== undefined) report.overview[key] = v;
+    }
+  }
+  const posts = s.optArr(body.posts, "posts");
+  if (posts) {
+    report.posts = posts.map((item, i) => {
+      const at = `posts[${i}]`;
+      const p = s.obj(item, at);
+      const post: ZernioAnalyticsPost = { _id: s.id(p._id, `${at}._id`) };
+      const status = s.optStr(p.status, `${at}.status`);
+      const publishedAt = s.optStr(p.publishedAt, `${at}.publishedAt`);
+      const analytics = readCounters(s, p.analytics, `${at}.analytics`);
+      if (status !== undefined) post.status = status;
+      if (publishedAt !== undefined) post.publishedAt = publishedAt;
+      if (analytics) post.analytics = analytics;
+      const legs = s.optArr(p.platforms, `${at}.platforms`);
+      if (legs) {
+        post.platforms = legs.map((legItem, j) => {
+          const lat = `${at}.platforms[${j}]`;
+          const leg = s.obj(legItem, lat);
+          const out: NonNullable<ZernioAnalyticsPost["platforms"]>[number] = { platform: s.id(leg.platform, `${lat}.platform`) };
+          for (const key of ["status", "platformPostId", "accountId"] as const) {
+            const v = s.optStr(leg[key], `${lat}.${key}`);
+            if (v) out[key] = v;
+          }
+          const legAnalytics = readCounters(s, leg.analytics, `${lat}.analytics`);
+          if (legAnalytics) out.analytics = legAnalytics;
+          return out;
+        });
+      }
+      return post;
+    });
+  }
+  return report;
+}
+
+/** A counters object: every value a finite number (a `null` counter is left out, never read as 0). */
+const COUNTERS = ["impressions", "reach", "likes", "comments", "shares", "saves", "clicks", "views", "follows"] as const;
+
+/**
+ * A counters object. The documented counters are each a finite number or
+ * absent (a `null` is left out, never read as 0). Any other key is an extra
+ * field: kept when it is a finite number (a counter Zernio added), ignored
+ * otherwise (metadata beside the counters), never a reason to refuse.
+ */
+function readCounters(s: Shape, value: unknown, at: string): ZernioAnalytics | undefined {
+  const bag = s.optObj(value, at);
+  if (!bag) return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, v] of Object.entries(bag)) {
+    const known = COUNTERS.find((c) => c === key);
+    const n = known ? s.optNum(v, `${at}.${known}`) : typeof v === "number" && Number.isFinite(v) ? v : undefined;
+    if (n !== undefined) out[key] = n;
+  }
+  return out;
 }
 
 export interface ZernioFlair {
@@ -427,10 +546,14 @@ export async function listRedditFlairs(
   accountId: string,
   subreddit: string,
 ): Promise<ZernioFlair[]> {
-  const body = await request<{ flairs?: ZernioFlair[] }>(
-    `/accounts/${encodeURIComponent(accountId)}/reddit-flairs?subreddit=${encodeURIComponent(subreddit)}`,
+  const { s, body } = zernioBody(
+    "GET /accounts/:id/reddit-flairs",
+    await request(`/accounts/${encodeURIComponent(accountId)}/reddit-flairs?subreddit=${encodeURIComponent(subreddit)}`),
   );
-  return body?.flairs ?? [];
+  return s.optEach(body.flairs, "flairs", (item, at) => {
+    const f = s.obj(item, at);
+    return { id: s.id(f.id, `${at}.id`), text: s.str(f.text, `${at}.text`) };
+  });
 }
 
 export interface ZernioBoard {
@@ -439,8 +562,15 @@ export interface ZernioBoard {
 }
 
 export async function listPinterestBoards(accountId: string): Promise<ZernioBoard[]> {
-  const body = await request<{ boards?: ZernioBoard[] }>(
-    `/accounts/${encodeURIComponent(accountId)}/pinterest-boards`,
+  const { s, body } = zernioBody(
+    "GET /accounts/:id/pinterest-boards",
+    await request(`/accounts/${encodeURIComponent(accountId)}/pinterest-boards`),
   );
-  return body?.boards ?? [];
+  return s.optEach(body.boards, "boards", (item, at) => {
+    const b = s.obj(item, at);
+    const board: ZernioBoard = { id: s.id(b.id, `${at}.id`) };
+    const name = s.optStr(b.name, `${at}.name`);
+    if (name !== undefined) board.name = name;
+    return board;
+  });
 }

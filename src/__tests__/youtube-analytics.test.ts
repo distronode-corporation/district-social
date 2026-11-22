@@ -192,7 +192,23 @@ describe("getVideoAnalytics", () => {
     await expect(getVideoAnalytics("v1", NOW)).resolves.toEqual({});
   });
 
-  it("skips dimension columns, unnamed headers and non-numeric cells instead of inventing a value", async () => {
+  it("refuses a metric cell that is not a number", async () => {
+    fetchMock().mockResolvedValue(
+      jsonResponse(200, { columnHeaders: [header("shares")], rows: [["n/a"]] }),
+    );
+    await expect(getVideoAnalytics("v1", NOW)).rejects.toThrow(/at rows\[0\]\[0\]: expected a count/);
+  });
+
+  it.each([
+    ["rows that is not an array", { rows: "x" }, /at rows: expected an array, got a string/],
+    ["a row that is not an array", { rows: [{ a: 1 }] }, /at rows\[0\]: expected an array, got an object/],
+    ["a header name that is a number", { columnHeaders: [{ name: 5 }], rows: [[1]] }, /at columnHeaders\[0\]\.name: expected a string/],
+  ])("refuses a report with %s", async (_label, body, why) => {
+    fetchMock().mockResolvedValue(jsonResponse(200, body));
+    await expect(getVideoAnalytics("v1", NOW)).rejects.toThrow(why);
+  });
+
+  it("skips dimension columns, unnamed headers and null cells instead of inventing a value", async () => {
     fetchMock().mockResolvedValue(
       jsonResponse(200, {
         columnHeaders: [
@@ -202,10 +218,10 @@ describe("getVideoAnalytics", () => {
           header("averageViewPercentage", "FLOAT"),
           header("estimatedMinutesWatched"),
         ],
-        rows: [["v1", 5, null, "12.5", "n/a"]],
+        rows: [["v1", 5, null, "12.5", 40]],
       }),
     );
-    await expect(getVideoAnalytics("v1", NOW)).resolves.toEqual({ averageViewPercentage: 12.5 });
+    await expect(getVideoAnalytics("v1", NOW)).resolves.toEqual({ averageViewPercentage: 12.5, estimatedMinutesWatched: 40 });
   });
 
   it("rewrites the scope refusal into a message naming yt-analytics.readonly", async () => {

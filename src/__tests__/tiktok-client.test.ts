@@ -229,11 +229,11 @@ describe("getProfile", () => {
 });
 
 describe("getPostMetrics", () => {
-  it("filters the video list to the one post and returns its row", async () => {
-    const row = { item_id: "7430000000000000001", video_views: 603, likes: 243, comments: 10, shares: 10 };
+  it("filters the video list to the one post and returns its counters", async () => {
+    const row = { item_id: "7430000000000000001", video_views: 603, likes: 243, comments: 10, shares: 10, cover: "x" };
     fetchMock.mockResolvedValue(ok({ cursor: 0, has_more: false, videos: [row] }));
 
-    await expect(getPostMetrics("7430000000000000001")).resolves.toEqual(row);
+    await expect(getPostMetrics("7430000000000000001")).resolves.toEqual({ video_views: 603, likes: 243, comments: 10, shares: 10 });
 
     const { url } = lastCall();
     expect(url.pathname).toBe("/open_api/v1.3/business/video/list/");

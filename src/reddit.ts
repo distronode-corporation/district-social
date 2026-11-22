@@ -25,6 +25,7 @@
 
 import type { Agent as UndiciAgent } from "undici";
 import { preparePinnedHttpsFetch } from "./ssrf.js";
+import { shape, type JsonObject, type Shape } from "./http/shape.js";
 import { retryAfterHeader } from "./retry.js";
 import { engineDeployment } from "./settings.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
@@ -205,13 +206,13 @@ function rateLimitReset(res: Response): string | null {
  * it a title or body containing any of those three characters comes back
  * from the vendor corrupted.
  */
-async function request<T>(
+async function request(
   method: string,
   path: string,
   // `query` values are plain strings: every caller passes a defined id list, so
   // there is no undefined value to skip (the type used to allow one nobody sent).
   opts: { query?: Record<string, string>; form?: URLSearchParams; timeoutMs?: number } = {},
-): Promise<T> {
+): Promise<unknown> {
   const accessToken = await token();
   const timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
 
@@ -249,9 +250,9 @@ async function request<T>(
         : text;
     throw new RedditError(res.status, body, method, path, retryAfter);
   }
-  if (!text) return undefined as T;
+  if (!text) return undefined;
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch {
     throw new RedditError(res.status, `expected JSON, got: ${text.slice(0, 200)}`, method, path);
   }
@@ -366,15 +367,31 @@ function awaitMediaPost(websocketUrl: string): Promise<RedditPost> {
       }
       const redirect = typeof update?.payload?.redirect === "string" ? update.payload.redirect : "";
       const id = /\/comments\/([a-z0-9]+)/i.exec(redirect)?.[1];
-      finish(id ? { id, name: `t3_${id}` } : unknownOutcome(`the announcement named no post: ${String(event.data).slice(0, 120)}`));
+      // The announcement is a vendor body: it is not echoed into the error.
+      finish(id ? { id, name: `t3_${id}` } : unknownOutcome("the announcement named no post"));
     };
   });
 }
 
-interface RedditSubmitResponse {
-  json?: {
-    errors?: Array<Array<string | undefined>>;
-    data?: RedditSubmitData;
+/** The `api_type=json` envelope of /api/submit: the error list and the data submitPost reads. */
+function readSubmitResponse(value: unknown): { errors: Array<Array<string | undefined>>; data?: RedditSubmitData; raw: unknown } {
+  const s = shape("reddit", "POST /api/submit");
+  const json = s.optObj(s.obj(value, "(body)").json, "json");
+  const errors = s.optEach(json?.errors, "json.errors", (entry, at) =>
+    s.each(entry, at, (part, partAt) => (part === null ? undefined : s.optStr(part, partAt))),
+  );
+  // A rejection is read before the success fields: a malformed `data` beside
+  // a real `json.errors` must not hide the rejection (and its flair signal).
+  if (errors.length) return { errors, raw: value };
+  const data = s.optObj(json?.data, "json.data");
+  return {
+    errors,
+    data: data && {
+      id: s.optStr(data.id, "json.data.id"),
+      name: s.optStr(data.name, "json.data.name"),
+      websocket_url: s.optStr(data.websocket_url, "json.data.websocket_url"),
+    },
+    raw: value,
   };
 }
 
@@ -439,9 +456,9 @@ export async function submitPost(input: SubmitPostInput): Promise<RedditPost> {
   if (input.sendReplies !== undefined) form.set("sendreplies", String(input.sendReplies));
   if (input.resubmit !== undefined) form.set("resubmit", String(input.resubmit));
 
-  const res = await request<RedditSubmitResponse>("POST", "/api/submit", { form });
+  const res = readSubmitResponse(await request("POST", "/api/submit", { form }));
 
-  const rawErrors = res.json?.errors ?? [];
+  const rawErrors = res.errors;
   if (rawErrors.length) {
     const entries: RedditApiErrorEntry[] = rawErrors.map((e) => ({
       code: e[0] ?? "UNKNOWN",
@@ -451,7 +468,7 @@ export async function submitPost(input: SubmitPostInput): Promise<RedditPost> {
     throw new RedditApiError(entries, "POST", "/api/submit");
   }
 
-  const data = res.json?.data;
+  const data = res.data;
   // An image submission answers with no id at all: the post is processed
   // asynchronously and its permalink arrives on a websocket (see awaitMediaPost).
   if (input.kind === "image" && !data?.name && data?.websocket_url) {
@@ -460,7 +477,7 @@ export async function submitPost(input: SubmitPostInput): Promise<RedditPost> {
   if (!data?.id || !data?.name) {
     throw new RedditError(
       200,
-      `submit returned 200 with no errors but no usable post id/name either: ${JSON.stringify(res).slice(0, 300)}`,
+      "submit returned 200 with no errors but no usable post id/name either",
       "POST",
       "/api/submit",
     );
@@ -486,7 +503,7 @@ export async function submitPost(input: SubmitPostInput): Promise<RedditPost> {
 export async function deleteThing(fullname: string): Promise<void> {
   const form = new URLSearchParams();
   form.set("id", fullname);
-  await request<unknown>("POST", "/api/del", { form });
+  await request("POST", "/api/del", { form });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -511,14 +528,15 @@ export async function deleteThing(fullname: string): Promise<void> {
  */
 export const INFO_BATCH_LIMIT = 100;
 
-interface RedditThingRef {
-  kind?: string;
-  data?: { id?: string; name?: string };
-}
-
-interface RedditListing {
-  kind?: string;
-  data?: { children?: RedditThingRef[] };
+/** The `data` of each child of an /api/info listing, as an object or absent. */
+function listingChildren(value: unknown): Array<{ data: JsonObject | undefined; at: string; s: Shape }> {
+  const s = shape("reddit", "GET /api/info");
+  const data = s.optObj(s.obj(value, "(body)").data, "data");
+  return s.optEach(data?.children, "data.children", (child, at) => ({
+    data: s.optObj(s.obj(child, at).data, `${at}.data`),
+    at: `${at}.data`,
+    s,
+  }));
 }
 
 /**
@@ -560,9 +578,9 @@ export async function getInfo(fullnames: string[]): Promise<Set<string>> {
   for (let i = 0; i < fullnames.length; i += INFO_BATCH_LIMIT) {
     // Never empty: the loop only runs while i < fullnames.length.
     const batch = fullnames.slice(i, i + INFO_BATCH_LIMIT);
-    const res = await request<RedditListing>("GET", "/api/info", { query: { id: batch.join(",") } });
-    for (const child of res.data?.children ?? []) {
-      const name = child.data?.name;
+    const res = await request("GET", "/api/info", { query: { id: batch.join(",") } });
+    for (const { data, at, s } of listingChildren(res)) {
+      const name = s.optStr(data?.name, `${at}.name`);
       if (name) found.add(name);
     }
   }
@@ -596,27 +614,23 @@ export interface RedditPostStats {
   upvoteRatio?: number;
 }
 
-interface RedditStatsThing {
-  data?: { name?: string; score?: number; num_comments?: number; upvote_ratio?: number };
-}
 
 export async function getPostStats(fullnames: string[]): Promise<RedditPostStats[]> {
   if (!fullnames.length) return [];
   const out: RedditPostStats[] = [];
   for (let i = 0; i < fullnames.length; i += INFO_BATCH_LIMIT) {
     const batch = fullnames.slice(i, i + INFO_BATCH_LIMIT);
-    const res = await request<{ data?: { children?: RedditStatsThing[] } }>(
-      "GET",
-      "/api/info",
-      { query: { id: batch.join(",") } },
-    );
-    for (const child of res.data?.children ?? []) {
-      const d = child.data;
-      if (!d?.name) continue;
-      const row: RedditPostStats = { name: d.name };
-      if (typeof d.score === "number") row.score = d.score;
-      if (typeof d.num_comments === "number") row.comments = d.num_comments;
-      if (typeof d.upvote_ratio === "number") row.upvoteRatio = d.upvote_ratio;
+    const res = await request("GET", "/api/info", { query: { id: batch.join(",") } });
+    for (const { data: d, at, s } of listingChildren(res)) {
+      const name = s.optStr(d?.name, `${at}.name`);
+      if (!d || !name) continue;
+      const row: RedditPostStats = { name };
+      const score = s.optNum(d.score, `${at}.score`);
+      const comments = s.optNum(d.num_comments, `${at}.num_comments`);
+      const upvoteRatio = s.optNum(d.upvote_ratio, `${at}.upvote_ratio`);
+      if (score !== undefined) row.score = score;
+      if (comments !== undefined) row.comments = comments;
+      if (upvoteRatio !== undefined) row.upvoteRatio = upvoteRatio;
       out.push(row);
     }
   }
@@ -634,10 +648,6 @@ export interface RedditSubredditAbout {
   over18?: boolean;
 }
 
-interface RedditAboutResponse {
-  kind?: string;
-  data?: { display_name?: string; submission_type?: string; over18?: boolean };
-}
 
 /**
  * GET /r/{subreddit}/about. PROVEN endpoint + scope against
@@ -659,13 +669,13 @@ interface RedditAboutResponse {
  * images" anyway, since it refuses all media publishing regardless).
  */
 export async function getSubredditAbout(subreddit: string): Promise<RedditSubredditAbout> {
-  const res = await request<RedditAboutResponse>("GET", `/r/${encodeURIComponent(subreddit)}/about`);
-  const d = res.data ?? {};
-  const st = d.submission_type;
+  const s = shape("reddit", "GET /r/:subreddit/about");
+  const d = s.optObj(s.obj(await request("GET", `/r/${encodeURIComponent(subreddit)}/about`), "(body)").data, "data") ?? {};
+  const st = s.optStr(d.submission_type, "data.submission_type");
   return {
-    displayName: d.display_name,
+    displayName: s.optStr(d.display_name, "data.display_name"),
     submissionType: st === "any" || st === "link" || st === "self" ? st : undefined,
-    over18: d.over18,
+    over18: s.optBool(d.over18, "data.over18"),
   };
 }
 
@@ -676,12 +686,6 @@ export interface RedditPostRequirements {
   titleMaxLength?: number;
 }
 
-interface RedditPostRequirementsResponse {
-  body_restriction_policy?: string;
-  is_flair_required?: boolean;
-  title_text_max_length?: number;
-  title_text_min_length?: number;
-}
 
 /**
  * GET /api/v1/{subreddit}/post_requirements. PROVEN against
@@ -696,13 +700,14 @@ interface RedditPostRequirementsResponse {
  * than the single one the task's briefing named.
  */
 export async function getPostRequirements(subreddit: string): Promise<RedditPostRequirements> {
-  const res = await request<RedditPostRequirementsResponse>("GET", `/api/v1/${encodeURIComponent(subreddit)}/post_requirements`);
-  const policy = res.body_restriction_policy;
+  const s = shape("reddit", "GET /api/v1/:subreddit/post_requirements");
+  const res = s.obj(await request("GET", `/api/v1/${encodeURIComponent(subreddit)}/post_requirements`), "(body)");
+  const policy = s.optStr(res.body_restriction_policy, "body_restriction_policy");
   return {
     bodyRestrictionPolicy: policy === "required" || policy === "notAllowed" || policy === "none" ? policy : undefined,
-    isFlairRequired: res.is_flair_required,
-    titleMinLength: res.title_text_min_length,
-    titleMaxLength: res.title_text_max_length,
+    isFlairRequired: s.optBool(res.is_flair_required, "is_flair_required"),
+    titleMinLength: s.optNum(res.title_text_min_length, "title_text_min_length"),
+    titleMaxLength: s.optNum(res.title_text_max_length, "title_text_max_length"),
   };
 }
 
@@ -731,17 +736,16 @@ export interface RedditFlairTemplate {
  * `[]` as proof a subreddit has no flair.
  */
 export async function getLinkFlair(subreddit: string): Promise<RedditFlairTemplate[]> {
-  const res = await request<unknown>("GET", `/r/${encodeURIComponent(subreddit)}/api/link_flair_v2`);
-  if (!Array.isArray(res)) return [];
-  const out: RedditFlairTemplate[] = [];
-  for (const raw of res) {
-    if (!raw || typeof raw !== "object") continue;
-    const item = raw as Record<string, unknown>;
-    const id = item.id ?? item.flair_template_id;
-    const text = item.text ?? item.flair_text;
-    if (typeof id === "string" && typeof text === "string") out.push({ id, text });
-  }
-  return out;
+  const s = shape("reddit", "GET /r/:subreddit/api/link_flair_v2");
+  const res = await request("GET", `/r/${encodeURIComponent(subreddit)}/api/link_flair_v2`);
+  // An empty body (no flair configured) is no templates; anything else must be the list.
+  if (res === undefined) return [];
+  return s.each(res, "(body)", (raw, at) => {
+    const item = s.obj(raw, at);
+    const id = s.id(item.id ?? item.flair_template_id, `${at}.id`);
+    const text = s.str(item.text ?? item.flair_text, `${at}.text`);
+    return { id, text };
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -767,13 +771,6 @@ export interface RedditProfile {
   totalKarma?: number;
 }
 
-interface RedditMeResponse {
-  id?: string;
-  name?: string;
-  link_karma?: number;
-  comment_karma?: number;
-  total_karma?: number;
-}
 
 /**
  * GET /api/v1/me. PROVEN endpoint + scope against
@@ -788,14 +785,20 @@ interface RedditMeResponse {
  * prose on either official page fetched for this file.
  */
 export async function getMe(): Promise<RedditProfile> {
-  const res = await request<RedditMeResponse>("GET", "/api/v1/me");
-  if (!res.id || !res.name) {
-    throw new RedditError(0, `GET /api/v1/me returned no id/name: ${JSON.stringify(res).slice(0, 200)}`, "GET", "/api/v1/me");
+  const s = shape("reddit", "GET /api/v1/me");
+  const res = s.obj(await request("GET", "/api/v1/me"), "(body)");
+  const id = s.optStr(res.id, "id");
+  const name = s.optStr(res.name, "name");
+  if (!id || !name) {
+    throw new RedditError(0, "GET /api/v1/me returned no id/name", "GET", "/api/v1/me");
   }
-  const profile: RedditProfile = { id: res.id, name: res.name };
-  if (typeof res.link_karma === "number") profile.linkKarma = res.link_karma;
-  if (typeof res.comment_karma === "number") profile.commentKarma = res.comment_karma;
-  if (typeof res.total_karma === "number") profile.totalKarma = res.total_karma;
+  const profile: RedditProfile = { id, name };
+  const linkKarma = s.optNum(res.link_karma, "link_karma");
+  const commentKarma = s.optNum(res.comment_karma, "comment_karma");
+  const totalKarma = s.optNum(res.total_karma, "total_karma");
+  if (linkKarma !== undefined) profile.linkKarma = linkKarma;
+  if (commentKarma !== undefined) profile.commentKarma = commentKarma;
+  if (totalKarma !== undefined) profile.totalKarma = totalKarma;
   return profile;
 }
 
@@ -835,6 +838,24 @@ interface RedditUploadLease {
   asset?: { asset_id?: string };
 }
 
+/** The S3 upload lease: where to POST, the policy fields in order, and the asset id. */
+function readUploadLease(value: unknown): RedditUploadLease {
+  const s = shape("reddit", "POST /api/media/asset.json");
+  const body = s.obj(value, "(body)");
+  const args = s.optObj(body.args, "args");
+  const asset = s.optObj(body.asset, "asset");
+  return {
+    args: args && {
+      action: s.optStr(args.action, "args.action"),
+      fields: s.optEach(args.fields, "args.fields", (f, at) => {
+        const field = s.obj(f, at);
+        return { name: s.optStr(field.name, `${at}.name`), value: s.optStr(field.value, `${at}.value`) };
+      }),
+    },
+    asset: asset && { asset_id: s.optStr(asset.asset_id, "asset.asset_id") },
+  };
+}
+
 /**
  * Step 1: ask Reddit for an S3 upload lease.
  * Step 2: POST the bytes to the S3 endpoint the lease names, with its fields.
@@ -850,14 +871,14 @@ export async function uploadMediaAsset(
   const form = new URLSearchParams();
   form.set("filepath", filename);
   form.set("mimetype", mimeType);
-  const lease = await request<RedditUploadLease>("POST", "/api/media/asset.json", { form });
+  const lease = readUploadLease(await request("POST", "/api/media/asset.json", { form }));
 
   const action = lease.args?.action;
   const fields = lease.args?.fields ?? [];
   if (!action || !fields.length) {
     throw new RedditError(
       0,
-      `media lease returned no upload action/fields: ${JSON.stringify(lease).slice(0, 200)}`,
+      "media lease returned no upload action/fields",
       "POST",
       "/api/media/asset.json",
     );

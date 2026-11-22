@@ -31,6 +31,7 @@
 
 import { retryAfterHeader } from "./retry.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";
+import { shape, type JsonObject, type Shape } from "./http/shape.js";
 
 export const TIKTOK_API_BASE_URL = "https://business-api.tiktok.com/open_api/v1.3";
 
@@ -101,19 +102,18 @@ export async function tiktokCredentials(): Promise<TikTokCredentials> {
   return _resolver();
 }
 
-/** The documented envelope every Accounts API response arrives in. */
-interface Envelope<T> {
-  code: number;
-  message: string;
-  data: T;
-}
-
-async function request<T>(
+/**
+ * One Accounts API call, its envelope (`{ code, message, data }`) read through
+ * a Shape: `code` must be a number, a non-zero code is the vendor's refusal
+ * (with `message` kept only when it is a string), and on code 0 `data` must be
+ * an object. The caller reads `data`'s fields with the returned Shape.
+ */
+async function request(
   method: "GET" | "POST",
   path: string,
   creds: TikTokCredentials,
   opts: { query?: Record<string, string>; body?: unknown; timeoutMs?: number },
-): Promise<T> {
+): Promise<{ s: Shape; data: JsonObject }> {
   const url = `${TIKTOK_API_BASE_URL}${path}${opts.query ? `?${new URLSearchParams(opts.query).toString()}` : ""}`;
   const resOpts: VendorFetchOptions = {
     timeoutMs: opts.timeoutMs ?? REQUEST_TIMEOUT_MS,
@@ -135,16 +135,20 @@ async function request<T>(
   );
   const text = await vendorText(res, resOpts);
   if (!res.ok) throw new TikTokError(res.status, null, text, method, path, retryAfterHeader(res));
-  let parsed: Envelope<T>;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text) as Envelope<T>;
+    parsed = JSON.parse(text) as unknown;
   } catch {
     throw new TikTokError(res.status, null, `expected JSON, got: ${text.slice(0, 200)}`, method, path);
   }
-  if (parsed.code !== 0) {
-    throw new TikTokError(res.status, parsed.code, parsed.message, method, path, retryAfterHeader(res));
+  const s = shape("tiktok", `${method} ${path}`);
+  const envelope = s.obj(parsed, "(body)");
+  const code = s.num(envelope.code, "code");
+  if (code !== 0) {
+    const message = typeof envelope.message === "string" ? envelope.message : `TikTok refused the request (code ${code})`;
+    throw new TikTokError(res.status, code, message, method, path, retryAfterHeader(res));
   }
-  return parsed.data;
+  return { s, data: s.obj(envelope.data, "data") };
 }
 
 /** A JSON array in a query parameter, which is how these GETs take string[] (the account profile doc). */
@@ -186,8 +190,9 @@ export interface TikTokVideoPublishInput {
 export async function publishVideo(input: TikTokVideoPublishInput): Promise<{ shareId: string }> {
   const creds = await tiktokCredentials();
   // `share_id` is on every documented success ("Unique identifier for the
-  // video post publishing task"), so it is read, not re-validated.
-  const data = await request<{ share_id: string }>("POST", "/business/video/publish/", creds, {
+  // video post publishing task"); a success without one is a shape error,
+  // which retry.ts counts as an unknown outcome, so the publish is never re-sent.
+  const { s, data } = await request("POST", "/business/video/publish/", creds, {
     timeoutMs: PUBLISH_TIMEOUT_MS,
     body: {
       business_id: creds.businessId,
@@ -203,7 +208,7 @@ export async function publishVideo(input: TikTokVideoPublishInput): Promise<{ sh
       },
     },
   });
-  return { shareId: data.share_id };
+  return { shareId: s.id(data.share_id, "data.share_id") };
 }
 
 /**
@@ -212,6 +217,8 @@ export async function publishVideo(input: TikTokVideoPublishInput): Promise<{ sh
  * this client never sends.
  */
 export type TikTokPublishStatus = "PROCESSING_DOWNLOAD" | "PUBLISH_COMPLETE" | "FAILED" | "SEND_TO_USER_INBOX";
+
+const PUBLISH_STATUSES: readonly TikTokPublishStatus[] = ["PROCESSING_DOWNLOAD", "PUBLISH_COMPLETE", "FAILED", "SEND_TO_USER_INBOX"];
 
 export interface TikTokPublishState {
   status: TikTokPublishStatus;
@@ -228,16 +235,17 @@ export interface TikTokPublishState {
 /** GET /business/publish/status/ (the publish status doc). */
 export async function publishStatus(shareId: string): Promise<TikTokPublishState> {
   const creds = await tiktokCredentials();
-  const data = await request<{ status: TikTokPublishStatus; post_ids?: string[]; reason?: string }>(
-    "GET",
-    "/business/publish/status/",
-    creds,
-    { query: { business_id: creds.businessId, publish_id: shareId } },
-  );
+  const { s, data } = await request("GET", "/business/publish/status/", creds, {
+    query: { business_id: creds.businessId, publish_id: shareId },
+  });
+  // A status outside the documented four is refused, not read as "still processing".
+  const raw = s.str(data.status, "data.status");
+  const status = PUBLISH_STATUSES.find((v) => v === raw) ?? s.fail("data.status", `one of ${PUBLISH_STATUSES.join(", ")}`, raw);
+  const reason = s.optStr(data.reason, "data.reason");
   return {
-    status: data.status,
-    postIds: data.post_ids ?? [],
-    ...(data.reason ? { reason: data.reason } : {}),
+    status,
+    postIds: s.optEach(data.post_ids, "data.post_ids", (id, at) => s.id(id, at)),
+    ...(reason ? { reason } : {}),
   };
 }
 
@@ -263,13 +271,14 @@ export interface TikTokProfile {
  */
 export async function getProfile(fields?: readonly string[]): Promise<TikTokProfile> {
   const creds = await tiktokCredentials();
-  const data = await request<{ display_name?: string; followers_count?: number }>(
-    "GET",
-    "/business/get/",
-    creds,
-    { query: { business_id: creds.businessId, ...(fields ? { fields: jsonParam(fields) } : {}) } },
-  );
-  return { businessId: creds.businessId, displayName: data.display_name, followersCount: data.followers_count };
+  const { s, data } = await request("GET", "/business/get/", creds, {
+    query: { business_id: creds.businessId, ...(fields ? { fields: jsonParam(fields) } : {}) },
+  });
+  return {
+    businessId: creds.businessId,
+    displayName: s.optStr(data.display_name, "data.display_name"),
+    followersCount: s.optNum(data.followers_count, "data.followers_count"),
+  };
 }
 
 /**
@@ -287,9 +296,9 @@ export const TIKTOK_POST_METRIC_FIELDS = ["video_views", "likes", "comments", "s
  * "deleted": the doc names "filtered out due to violations, such as music
  * copyright violation" as the likely reason.
  */
-export async function getPostMetrics(postId: string): Promise<Record<string, unknown> | null> {
+export async function getPostMetrics(postId: string): Promise<Record<string, number> | null> {
   const creds = await tiktokCredentials();
-  const data = await request<{ videos: Array<Record<string, unknown>> }>("GET", "/business/video/list/", creds, {
+  const { s, data } = await request("GET", "/business/video/list/", creds, {
     query: {
       business_id: creds.businessId,
       // "you need to at least include item_id" when asking for several fields.
@@ -297,5 +306,16 @@ export async function getPostMetrics(postId: string): Promise<Record<string, unk
       filters: jsonParam({ video_ids: [postId] }),
     },
   });
-  return data.videos.find((v) => v.item_id === postId) ?? null;
+  // Every listed video is read: `item_id` a non-empty string, each counter
+  // asked for a finite number or absent (absent stays absent, never 0).
+  const videos = s.each(data.videos, "data.videos", (item, at) => {
+    const v = s.obj(item, at);
+    const metrics: Record<string, number> = {};
+    for (const field of TIKTOK_POST_METRIC_FIELDS) {
+      const value = s.optNum(v[field], `${at}.${field}`);
+      if (value !== undefined) metrics[field] = value;
+    }
+    return { id: s.id(v.item_id, `${at}.item_id`), metrics };
+  });
+  return videos.find((v) => v.id === postId)?.metrics ?? null;
 }
