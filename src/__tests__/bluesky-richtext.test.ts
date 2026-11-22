@@ -132,6 +132,11 @@ describe("link schemes", () => {
     ]);
   });
 
+  /** A backslash ends the authority in URL parsing (WHATWG), so what follows is path. */
+  it("ends the host at a backslash, keeping the rest as written", () => {
+    expect(links("https://Example.com\\Some/Path")).toEqual([{ uri: "https://example.com\\Some/Path", bytes: [0, 29] }]);
+  });
+
   it("keeps the user part of an authority as written, lower-casing only the host", () => {
     expect(links("Https://Me@Example.COM:8443/P")).toEqual([{ uri: "https://Me@example.com:8443/P", bytes: [0, 29] }]);
   });

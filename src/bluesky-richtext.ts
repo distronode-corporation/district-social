@@ -60,7 +60,8 @@ function utf8Index(text: string, i: number): number {
  * everything after the authority keep their case.
  */
 function lowerSchemeAndHost(uri: string): string {
-  return uri.replace(/^(https?):\/\/([^/?#]*)/i, (_all, scheme: string, authority: string) => {
+  // The authority ends at "/", "?", "#" or "\\" (a backslash ends it too in URL parsing).
+  return uri.replace(/^(https?):\/\/([^/?#\\]*)/i, (_all, scheme: string, authority: string) => {
     const at = authority.lastIndexOf("@") + 1;
     return `${scheme.toLowerCase()}://${authority.slice(0, at)}${authority.slice(at).toLowerCase()}`;
   });
