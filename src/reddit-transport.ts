@@ -55,6 +55,7 @@ import type {
 } from "./transport.js";
 import type { MediaAsset } from "./types.js";
 import { getErrorMessage } from "./error-message.js";
+import { fetchMediaBytes } from "./media-fetch.js";
 
 const MB = 1024 * 1024;
 
@@ -144,9 +145,11 @@ async function tryUploadFirstImage(media: MediaAsset[]): Promise<string | null> 
   if (!asset?.url) return null;
 
   try {
-    const res = await fetch(asset.url, { signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) throw new Error(`fetching the asset returned HTTP ${res.status}`);
-    const bytes = new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>;
+    // The shared media fetcher, like every other transport's upload: the URL checks
+    // and pinned connection of ./ssrf.ts, no redirects, its timeout and its byte cap.
+    // Any refusal it throws lands in the catch below, so the post degrades to a self
+    // post instead of failing.
+    const bytes = await fetchMediaBytes("reddit", asset.url);
     const filename = asset.url.split("/").pop()?.split("?")[0] || "image.jpg";
     const { url } = await uploadMediaAsset(bytes, filename, asset.mimeType);
     return url;

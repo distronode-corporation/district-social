@@ -29,13 +29,31 @@ vi.mock("../reddit.js", async (importActual) => {
   };
 });
 
+/**
+ * The real shared fetcher, wrapped only so one test can lower its byte cap: a real
+ * over-cap body would buffer half a gigabyte in the test. Every other test runs the
+ * fetcher exactly as the transport calls it.
+ */
+const mf = vi.hoisted(() => ({ maxBytes: undefined as number | undefined }));
+vi.mock("../media-fetch.js", async (importActual) => {
+  const actual = await importActual<typeof import("../media-fetch.js")>();
+  return {
+    ...actual,
+    fetchMediaBytes: vi.fn((platform: string, url: string, opts?: { timeoutMs?: number; maxBytes?: number }) =>
+      actual.fetchMediaBytes(platform, url, mf.maxBytes === undefined ? opts : { ...opts, maxBytes: mf.maxBytes }),
+    ),
+  };
+});
+
 import { submitPost, uploadMediaAsset } from "../reddit.js";
+import { fetchMediaBytes, MEDIA_FETCH_MAX_BYTES } from "../media-fetch.js";
 import { redditTransport } from "../reddit-transport.js";
 import type { MediaAsset, PlatformRender } from "../types.js";
 import type { DirectPublishInput, PublishDestination } from "../transport.js";
 
 const submitPostMock = submitPost as unknown as ReturnType<typeof vi.fn>;
 const uploadMock = uploadMediaAsset as unknown as ReturnType<typeof vi.fn>;
+const fetchMediaBytesMock = fetchMediaBytes as unknown as ReturnType<typeof vi.fn>;
 
 function image(url = "https://cdn.example.com/card.png"): MediaAsset {
   return { path: "/tmp/card.png", type: "image", mimeType: "image/png", size: 1000, url } as MediaAsset;
@@ -58,10 +76,12 @@ function input(over: { content?: string; media?: MediaAsset[]; link?: string }):
 beforeEach(() => {
   submitPostMock.mockReset();
   uploadMock.mockReset();
+  fetchMediaBytesMock.mockClear();
+  mf.maxBytes = undefined;
   submitPostMock.mockResolvedValue({ name: "t3_abc", id: "abc" });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer })),
+    vi.fn(async () => new Response(new Uint8Array([1, 2, 3]))),
   );
   process.env.SOCIALMETA_REDDIT_MEDIA_UPLOAD = "1";
 });
@@ -114,13 +134,15 @@ describe("reddit media upload", () => {
    */
   it("degrades to a self post when the asset URL itself answers an error", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) })));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", { status: 404 })));
 
     await redditTransport.publishNow(input({ content: "", media: [image()] }));
 
     expect(uploadMock).not.toHaveBeenCalled();
     expect(submitPostMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "self" }));
-    expect(warn.mock.calls.map((c) => String(c[0])).join(" ")).toContain("HTTP 404");
+    expect(warn.mock.calls.map((c) => String(c[0])).join(" ")).toContain(
+      "reddit: failed to fetch media asset (404): https://cdn.example.com/card.png",
+    );
     warn.mockRestore();
   });
 
@@ -184,5 +206,96 @@ describe("reddit media upload", () => {
     expect(submitPostMock).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "link", url: "https://example.com/x" }),
     );
+  });
+});
+
+/**
+ * The image upload fetches its asset through the shared media fetcher
+ * (`fetchMediaBytes`), so it gets the same URL checks and byte cap as every other
+ * transport. Each refusal degrades to the self post, and no request is sent for a
+ * destination the checks refuse. The pinned-dispatcher half (a hostname that
+ * resolves to a private address, a redirect) is in reddit-media-pinned.test.ts,
+ * because DNS is skipped under NODE_ENV=test.
+ */
+describe("reddit media upload: the asset fetch", () => {
+  async function refusedWith(url: string, fragment: string): Promise<void> {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await redditTransport.publishNow(input({ content: "", media: [image(url)] }));
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(uploadMock).not.toHaveBeenCalled();
+      expect(submitPostMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "self" }));
+      const warned = warn.mock.calls.map((c) => String(c[0])).join(" ");
+      expect(warned).toContain("[reddit] media upload failed, falling back to a self post: reddit: failed to fetch media asset (");
+      expect(warned).toContain(fragment);
+    } finally {
+      warn.mockRestore();
+    }
+  }
+
+  it("uploads exactly the bytes the shared fetcher read from the asset URL", async () => {
+    uploadMock.mockResolvedValue({ url: "https://s3.example.com/bucket/key.png" });
+
+    await redditTransport.publishNow(input({ content: "", media: [image()] }));
+
+    expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/card.png", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(uploadMock).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), "card.png", "image/png");
+  });
+
+  it.each([
+    ["a private IPv4 literal", "https://10.0.0.5/card.png"],
+    ["a loopback literal", "https://127.0.0.1/card.png"],
+    ["the cloud metadata address", "https://169.254.169.254/latest/meta-data/"],
+    ["a private IPv6 literal", "https://[fd00::1]/card.png"],
+    ["an IPv4-mapped IPv6 loopback", "https://[::ffff:127.0.0.1]/card.png"],
+    ["localhost", "https://localhost/card.png"],
+  ])("refuses %s before any request and keeps the self post", async (_label, url) => {
+    await refusedWith(url, "SSRF guard");
+  });
+
+  it("refuses a plain-HTTP asset URL before any request", async () => {
+    await refusedWith("http://cdn.example.com/card.png", "SSRF guard");
+  });
+
+  it("refuses a body declared over the byte cap without reading it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pulled = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ pull: pulled });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { headers: { "content-length": String(MEDIA_FETCH_MAX_BYTES + 1) } })),
+    );
+
+    await redditTransport.publishNow(input({ content: "", media: [image()] }));
+
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(submitPostMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "self" }));
+    expect(warn.mock.calls.map((c) => String(c[0])).join(" ")).toContain(
+      `reddit: media asset exceeds the fetch byte cap (${MEDIA_FETCH_MAX_BYTES} bytes): https://cdn.example.com/card.png`,
+    );
+    warn.mockRestore();
+  });
+
+  /**
+   * ⛔ A missing or lying Content-Length is caught while streaming. A test cap
+   * stands in for the 512 MiB one (a real over-cap body would buffer half a
+   * gigabyte in the test), passed through by wrapping the real fetcher, so the
+   * code under test is still the one the transport calls.
+   */
+  it("refuses a streamed body that outgrows the byte cap", async () => {
+    mf.maxBytes = 4;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4, 5, 6]))));
+
+    await redditTransport.publishNow(input({ content: "", media: [image()] }));
+
+    expect(fetchMediaBytesMock).toHaveBeenCalledWith("reddit", "https://cdn.example.com/card.png");
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(submitPostMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "self" }));
+    expect(warn.mock.calls.map((c) => String(c[0])).join(" ")).toContain(
+      "reddit: media asset exceeds the fetch byte cap (4 bytes): https://cdn.example.com/card.png",
+    );
+    warn.mockRestore();
   });
 });

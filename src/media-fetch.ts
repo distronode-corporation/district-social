@@ -4,7 +4,7 @@
  * error so publish failures group per platform.
  *
  * One shared copy instead of one per transport, so every upload (x, bluesky,
- * linkedin, pinterest, and YouTube's video variant) gets the same 20s timeout
+ * linkedin, pinterest, reddit's image upload, and YouTube's video variant) gets the same 20s timeout
  * and the same body cap. `arrayBuffer()` alone buffers whatever the host
  * sends, so a hostile or broken asset URL could stream an unbounded body into
  * process memory. The byte cap rides the shared capped reader

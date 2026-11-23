@@ -39,6 +39,9 @@ in the version bump, before the tag.
 - Media asset fetches go through the SSRF guard (`src/ssrf.ts`): an asset URL must be
   public HTTPS, the connection is pinned to the address that was checked, and a redirect is
   refused rather than followed.
+- Reddit's image upload fetches its asset with the shared media fetcher (`src/media-fetch.ts`),
+  so it gets the same URL checks, timeout and byte cap as every other network's upload. A
+  refused or failed fetch still falls back to a self post.
 - Bluesky runs on the engine's own AT Protocol client (`src/bluesky-xrpc.ts`) instead of
   `@atproto/api`: direct XRPC calls for the session, posts, replies, deletes, image uploads
   and reads. Stored sessions resume as before, and the exported types keep their shape.
