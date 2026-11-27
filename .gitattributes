@@ -1,2 +1,6 @@
+# SPDX-FileCopyrightText: Distronode Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Every text file checks out with LF on every platform, Windows included.
 * text=auto eol=lf

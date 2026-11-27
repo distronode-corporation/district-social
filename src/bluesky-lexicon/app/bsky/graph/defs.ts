@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Vendored from @atproto/api 0.20.44 (dist/client/types/app/bsky/graph/defs.d.ts), generated
  * lexicon types, copyright Bluesky Social PBC and contributors, MIT licence (see

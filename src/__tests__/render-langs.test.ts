@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * parseRenderLangs: the one rule behind every editor that writes a render's
  * `langs` (the hosted PUT's `renders` and `renderPatch`, and the CLI's

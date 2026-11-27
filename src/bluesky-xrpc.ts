@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The AT Protocol client Bluesky publishing runs on: XRPC calls over fetch, a
  * credential session that logs in, resumes and refreshes itself, and the

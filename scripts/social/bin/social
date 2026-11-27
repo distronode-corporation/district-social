@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+
+# SPDX-FileCopyrightText: Distronode Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # social CLI shim: runs the TypeScript entry point through this repository's tsx.
 #
 # The CLI has no install of its own: it uses the node_modules at the repository

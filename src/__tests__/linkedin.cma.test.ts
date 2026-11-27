@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The LinkedIn Community Management API calls: Page comments read and
  * reply, time-bound follower and share statistics, the single-post GET the

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * `social preflight <id>` (scripts/social/preflight.ts): one GET to the agent
  * API's preflight, printed as a verdict and its parts, or as JSON. The client

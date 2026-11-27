@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { GoogleAuth } from "google-auth-library";
 import { vertexVideoConfig } from "./settings.js";
 import { vendorFetch, vendorText, type VendorFetchOptions } from "./vendor-fetch.js";

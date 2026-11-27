@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { timezone, defaults, vertexVideoConfig, setEngineDeployment, engineDeployment } from "../settings.js";
 

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * YouTube Data API v3 vendor client, plus the YouTube Analytics API (reports
  * v2) at the bottom of the file, which shares this file's token and request.

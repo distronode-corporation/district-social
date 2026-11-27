@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { NO_BRAND, editorRole, type BrandContext } from "./brand-context.js";
 import { defaults } from "./settings.js";
 import { genJson, modelStamp } from "./claude.js";

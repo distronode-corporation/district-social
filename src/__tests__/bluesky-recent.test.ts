@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * bluesky.ts listRecentPosts: the account's own post records, newest first,
  * for the agent publish's crash check. The XRPC client is mocked; no network.

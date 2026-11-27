@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Instagram's DirectTransport — the first of the P3 Meta trio (Facebook Page,
  * Instagram, Threads) built on top of meta-graph.ts's shared client.

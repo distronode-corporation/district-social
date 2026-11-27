@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Every platform the engine can publish to. This is a PUBLISHING surface, not
  * a list of public profiles: adding a platform here never advertises an

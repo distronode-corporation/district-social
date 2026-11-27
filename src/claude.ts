@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import Anthropic from "@anthropic-ai/sdk";
 import { ANTHROPIC_API_BASE_URL, tokenSource, wifCredentials, wifSettingsFromEnv } from "./anthropic-wif.js";
 import type { ModelStamp } from "./types.js";

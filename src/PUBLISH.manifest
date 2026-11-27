@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Distronode Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # district-social publish scope, as read in the host package this engine is developed in: the
 # files that leave that package for this public repository.
 #

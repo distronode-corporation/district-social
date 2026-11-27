@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Deterministic text surgery: hashtag trimming, whitespace tidying, and moving a
  * link out of a post body into a reply or a first comment.

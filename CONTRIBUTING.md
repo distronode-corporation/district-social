@@ -3,6 +3,8 @@
 Thanks for helping. This file says how to run what CI runs, and the few rules that are not
 negotiable.
 
+New here? Issues labelled [good first issue](https://github.com/distronode-corporation/district-social/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) are small, well scoped and need no access beyond this repository.
+
 ## Status
 
 The engine (`src/`) and the CLI (`scripts/social/`) are here and pass the gate below. The npm

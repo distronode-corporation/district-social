@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The one fetch wrapper every vendor client in this engine sends through: a
  * bounded request whose transport failure arrives as the client's OWN error

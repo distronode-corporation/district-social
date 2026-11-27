@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Facebook Page's DirectTransport — one of the P3 trio (Facebook, Instagram,
  * Threads) sharing meta-graph.ts. Mirrors the split bluesky-transport.ts

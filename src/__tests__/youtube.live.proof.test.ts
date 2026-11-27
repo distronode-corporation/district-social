@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Opt-in LIVE proof that the YouTube transport can UPLOAD, read back and
  * DELETE. Skipped unless RUN_YOUTUBE_PUBLISH_PROOF=1, so CI never uploads

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * LinkedIn's DirectTransport — the second direct-vendor transport this engine
  * has, built to the shape bluesky-transport.ts established (see that file's

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Distronode Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
 name: gitleaks
 
 # Secret scanning of the whole git history with gitleaks. The binary is the upstream release

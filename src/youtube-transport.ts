@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * YouTube's DirectTransport — mirrors pinterest-transport.ts's split: what an
  * upload/delete/lookup MEANS on this platform lives here; everything about

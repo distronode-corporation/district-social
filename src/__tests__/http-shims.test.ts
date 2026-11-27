@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The three old helper paths (vendor-fetch, retry, meta-graph) are shims over
  * src/http/. Each must hand out the SAME bindings

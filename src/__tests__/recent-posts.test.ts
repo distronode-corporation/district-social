@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The recent-posts reads behind the agent publish's crash check, and the window
  * rule that decides whether a read may answer "not sent". Every network call is

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // @ts-check
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";

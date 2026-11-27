@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Bounded retry with jittered backoff, and the safety rule that decides when a
  * retry is allowed at all.

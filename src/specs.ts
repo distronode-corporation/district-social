@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { NO_BRAND, fillBrandPlaceholders, type BrandContext } from "./brand-context.js";
 import { countUnit, measureLength } from "./length.js";
 import type { CountMode } from "./transport.js";

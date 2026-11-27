@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * scripts/social/api.ts: the CLI's keyless client for a Social HQ agent API.
  * fetch and google-auth-library are stubbed; nothing leaves the process.

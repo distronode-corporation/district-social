@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "vitest";
 import { SPECS, specBlock, vendorLength } from "../specs.js";
 import { ALL_PLATFORMS } from "../types.js";

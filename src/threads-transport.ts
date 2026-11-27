@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Threads' DirectTransport — mirrors bluesky-transport.ts's split: what a
  * post/reply/carousel/delete/lookup MEANS on this platform lives here;
