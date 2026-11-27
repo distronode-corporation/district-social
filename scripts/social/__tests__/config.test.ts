@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * scripts/social/config.ts: the social CLI's machine-local config.json and the
  * bridge that copies it into the env vars the engine reads.

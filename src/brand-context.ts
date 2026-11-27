@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The brand as data: what a brand pack hands the engine, and the context every
  * brand-aware engine function reads it through.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { setEngineDeployment } from "../settings.js";
 import { ResponseShapeError } from "../http/shape.js";

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Per-platform optimization playbooks: the techniques that should happen EVERY
  * time, applied deterministically instead of asked for in a prompt.

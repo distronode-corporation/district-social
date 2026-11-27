@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * scripts/social/render.ts: the CLI's text previews of a draft and its QA report.
  * The Social HQ engine is mocked at its module boundary: these tests pin what

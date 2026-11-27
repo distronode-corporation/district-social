@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { detectFacets, resolveMentions } from "../bluesky-richtext.js";

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * scripts/social/cli.ts: every command of the `npm run social` CLI, run
  * in-process through commander, against a fake agent API.

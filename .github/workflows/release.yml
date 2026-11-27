@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Distronode Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
 name: Release
 
 # A `vX.Y.Z` tag on main publishes district-social to npm, and nothing else does:

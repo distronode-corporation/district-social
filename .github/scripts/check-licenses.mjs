@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 // Every package in package-lock.json must carry a licence from the allowlist below. The
 // lockfile records each package's `license` field, so this needs no install and no network.
 //

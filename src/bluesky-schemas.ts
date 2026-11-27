@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The shape of every Bluesky (AT Protocol) response the client reads, checked
  * field by field with zod at the client boundary.

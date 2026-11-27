@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Opt-in LIVE proof that the Threads transport can PUBLISH and, more
  * importantly, DELETE. Skipped unless RUN_THREADS_PUBLISH_PROOF=1, so CI never

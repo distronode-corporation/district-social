@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { defaults } from "./settings.js";
 import { normalizeCardMediaIndices, unpublishableVideoIndices } from "./media-pick.js";
 import { SENDS_FIRST_COMMENT, SPECS, normalizeSubreddit } from "./specs.js";

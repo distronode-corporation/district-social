@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The one capped reader for untrusted HTTP response bodies: it refuses a body
  * over `maxBytes` rather than truncating it, and it stops reading at the first

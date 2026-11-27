@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Bluesky's DirectTransport — the first direct-vendor transport this engine
  * has, and the shape every later one (LinkedIn, the Meta trio, Reddit, X,

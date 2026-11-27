@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Env-driven settings for the engine. Everything here is read
  * lazily (at call time, never at module load) so the engine has no import-time

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The one media asset fetch every transport uploads from: fetch a render's
  * asset URL, bounded in TIME and in BYTES, with the platform's name in every

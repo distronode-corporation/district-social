@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Distronode Corporation
+#
+# SPDX-License-Identifier: Apache-2.0
+
 name: Bug report
 description: Something in the engine or the CLI does not work as documented.
 labels: [bug]

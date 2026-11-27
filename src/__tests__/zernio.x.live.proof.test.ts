@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { zernioAggregator, resetZernioAccounts } from "../zernio-aggregator.js";
 import { setZernioTokenResolver, listAccounts } from "../zernio.js";

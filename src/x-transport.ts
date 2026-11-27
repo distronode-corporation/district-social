@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * X (Twitter)'s DirectTransport — built to the shape bluesky-transport.ts
  * established, since X is the platform with a real reply-chain model closest

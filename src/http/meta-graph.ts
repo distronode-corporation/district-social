@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { createHmac } from "node:crypto";
 
 import { graphTime, type RecentPostsPage } from "../recent-posts.js";

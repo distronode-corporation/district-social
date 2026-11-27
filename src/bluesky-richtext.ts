@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Bluesky facet detection: links, mentions, hashtags and cashtags, with the
  * UTF-8 byte offsets the `app.bsky.richtext.facet` lexicon indexes by.

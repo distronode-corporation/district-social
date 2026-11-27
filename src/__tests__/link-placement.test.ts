@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, it, expect } from "vitest";
 import { moveLinkToFirstComment, moveLinkToThread, extractLink, trimHashtags, URL_RE } from "../link-placement.js";
 import type { PlatformRender } from "../types.js";

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * claude.ts: Social HQ's one text path (Claude Sonnet 5.5, effort high,
  * structured output, direct Anthropic API).

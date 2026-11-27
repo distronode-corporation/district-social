@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Command } from "commander";
 import type { ApiClient } from "./api.js";
 import type { QAReport } from "../../src/index.js";

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The account's own recent posts, as each network's read returns them, for one
  * question only: did a publish that crashed mid-send reach this platform? The

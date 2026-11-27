@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Opt-in LIVE proof that the Bluesky transport can actually PUBLISH and, more
  * importantly, actually DELETE. Skipped unless RUN_BLUESKY_PUBLISH_PROOF=1, so

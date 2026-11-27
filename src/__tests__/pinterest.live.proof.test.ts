@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Opt-in LIVE proof that the Pinterest transport can PUBLISH and DELETE.
  * Skipped unless RUN_PINTEREST_PUBLISH_PROOF=1, so CI never posts anything.

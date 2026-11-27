@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * `social unschedule <id>` (scripts/social/unschedule.ts): one POST with the
  * session id, printed plainly or as JSON. The client is stubbed.

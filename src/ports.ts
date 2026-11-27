@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The engine's ports: the interfaces an application implements to give the
  * engine storage, credentials, media, a model, time, mutual exclusion and

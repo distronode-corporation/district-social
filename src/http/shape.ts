@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Reading a vendor response at the client boundary: the fields a client uses,
  * checked one by one, with a typed error when one is not what it must be.

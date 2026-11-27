@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 import { connectedAccounts } from "./publish.js";
 import { routeTransportFor } from "./transport.js";
 import { ALL_PLATFORMS, type Platform } from "./types.js";

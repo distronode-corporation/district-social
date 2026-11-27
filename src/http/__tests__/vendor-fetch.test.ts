@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Distronode Corporation
+//
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * vendor-fetch.ts: the one place a vendor request is bounded and its transport
  * failure becomes the client's own error with `status: 0`.
