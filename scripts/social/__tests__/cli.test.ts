@@ -228,7 +228,7 @@ describe("new", () => {
     );
     let n = 0;
     h.request.mockImplementation(async (_m: string, p: string, body: FormData) => {
-      if (p === "/media") return { asset: { id: `up${n++}:${body.get("altText") ?? "-"}` } };
+      if (p === "/media") return { asset: { id: `up${n++}:${String(body.get("altText") ?? "-")}` } };
       return view();
     });
     await run("new", "--spec", spec, "--title", "flag title", "--json");
