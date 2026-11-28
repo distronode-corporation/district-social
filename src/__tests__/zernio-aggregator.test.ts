@@ -1379,13 +1379,14 @@ describe("degenerate inputs and non-ZernioError failures", () => {
     );
   });
 
-  it("still reports disconnected when the rejection is not an Error at all", async () => {
-    // connectStatus is contractually forbidden from throwing; a non-Error
-    // rejection (some agents/undici internals) must not sneak past the guard and
-    // take out connectedAccounts for every platform at once.
+  it("still reports disconnected when the fetch rejects", async () => {
+    // connectStatus is contractually forbidden from throwing; a rejected fetch
+    // must not sneak past the guard and take out connectedAccounts for every
+    // platform at once. (getErrorMessage still maps a non-Error rejection to
+    // a readable reason; that mapping is covered in error-message.test.ts.)
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => Promise.reject("socket hang up")),
+      vi.fn(() => Promise.reject(new Error("socket hang up"))),
     );
     const status = await zernioAggregator.connectStatus("reddit");
     expect(status.connected).toBe(false);

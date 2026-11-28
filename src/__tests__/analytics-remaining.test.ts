@@ -349,7 +349,7 @@ describe("linkedin analytics", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("token store unavailable"));
     warn.mockRestore();
 
-    setLinkedInTokenResolver(() => Promise.reject("token store down"));
+    setLinkedInTokenResolver(() => Promise.reject(new Error("token store down")));
     await expect(linkedinTransport.analyticsPost!(SHARE)).rejects.toThrow("token store down / token store down");
   });
 
